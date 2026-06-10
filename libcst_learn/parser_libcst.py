@@ -102,10 +102,25 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 ):
                     router_fn = node.args[1].value.value
 
+                # Extract mapping
+                mapping = {}
+                if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
+                    for elt in node.args[2].value.elements:
+                        if isinstance(elt, cst.DictElement):
+                            key = None
+                            val = None
+                            if isinstance(elt.key, cst.SimpleString):
+                                key = elt.key.evaluated_value
+                            if isinstance(elt.value, cst.SimpleString):
+                                val = elt.value.evaluated_value
+                            if key and val:
+                                mapping[key] = val
+
                 self.conditional_edges.append(
                     {
                         "source": source,
                         "router": router_fn,
+                        "mapping": mapping
                     }
                 )
 
