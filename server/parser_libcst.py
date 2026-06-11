@@ -153,29 +153,40 @@ class ToolCallVisitor(cst.CSTVisitor):
                 node.func.value
             )
 
-with open("agent.py", "r", encoding="utf8") as f:
-    source = f.read()
+if __name__ == "__main__":
+    import os
+    
+    # Try to find agent.py in parent or current dir for testing
+    agent_path = "agent.py"
+    if not os.path.exists(agent_path):
+        agent_path = os.path.join("..", "agent.py")
+        
+    if os.path.exists(agent_path):
+        with open(agent_path, "r", encoding="utf8") as f:
+            source = f.read()
 
-module = cst.parse_module(source)
+        module = cst.parse_module(source)
 
-analyzer = LangGraphAnalyzer()
-module.visit(analyzer)
+        analyzer = LangGraphAnalyzer()
+        module.visit(analyzer)
 
-tool_visitor = ToolCallVisitor()
-module.visit(tool_visitor)
+        tool_visitor = ToolCallVisitor()
+        module.visit(tool_visitor)
 
-print("\nFUNCTIONS")
-print(analyzer.functions)
+        print("\nFUNCTIONS")
+        print(analyzer.functions)
 
-print("\nGRAPH NODES")
-print(analyzer.nodes)
+        print("\nGRAPH NODES")
+        print(analyzer.nodes)
 
-print("\nEDGES")
-print(analyzer.edges)
+        print("\nEDGES")
+        print(analyzer.edges)
 
-print("\nCONDITIONAL")
-print(analyzer.conditional_edges)
+        print("\nCONDITIONAL")
+        print(analyzer.conditional_edges)
 
-print("\nCALLS")
-for fn, calls in tool_visitor.calls.items():
-    print(fn, "->", calls)
+        print("\nCALLS")
+        for fn, calls in tool_visitor.calls.items():
+            print(fn, "->", calls)
+    else:
+        print("agent.py not found for standalone test.")

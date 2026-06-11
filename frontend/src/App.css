@@ -22,7 +22,53 @@ body {
   gap: 10px;
 }
 
-.add-node-btn {
+.empty-state-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  text-align: center;
+  background: white;
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.empty-state-container h2 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 24px;
+}
+
+.empty-state-container p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.empty-state-upload-btn {
+  padding: 12px 24px;
+  background-color: #10b981;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.empty-state-upload-btn:hover {
+  background-color: #059669;
+}
+
+.add-node-btn, .upload-btn {
   padding: 8px 16px;
   background-color: #3b82f6;
   color: white;
@@ -34,8 +80,16 @@ body {
   transition: background-color 0.2s;
 }
 
-.add-node-btn:hover {
+.add-node-btn:hover, .upload-btn:hover {
   background-color: #2563eb;
+}
+
+.upload-btn {
+  background-color: #10b981;
+}
+
+.upload-btn:hover {
+  background-color: #059669;
 }
 
 .editable-node-container {

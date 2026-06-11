@@ -61,59 +61,96 @@ function App() {
     );
   }, [setEdges]);
 
+  const processGraphData = useCallback((data) => {
+    // Inject handlers into nodes
+    const nodesWithHandlers = data.nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        type: node.type,
+        onDelete: onDeleteNode,
+        onRename: onRenameNode,
+      },
+    }));
+
+    // Inject handlers and styling into edges
+    const edgesWithHandlers = data.edges.map((edge) => {
+      const isConditional = edge.id.includes('-cond') || !!edge.label;
+      return {
+        ...edge,
+        type: 'deletable',
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 20,
+          height: 20,
+          color: '#b1b1b7',
+        },
+        style: {
+          strokeWidth: 2,
+          stroke: '#b1b1b7',
+          ...edge.style,
+        },
+        data: {
+          ...edge.data,
+          isConditional,
+          label: edge.label || (isConditional ? 'Conditional Edge' : ''),
+          onDelete: onDeleteEdge,
+          onRenameLabel: onRenameEdgeLabel,
+        },
+      };
+    });
+
+    setNodes(nodesWithHandlers);
+    setEdges(edgesWithHandlers);
+  }, [onDeleteNode, onRenameNode, onDeleteEdge, onRenameEdgeLabel, setNodes, setEdges]);
+
   useEffect(() => {
     const fetchGraph = async () => {
       try {
         const response = await fetch('http://localhost:8000/api/graph');
         const data = await response.json();
-        
-        // Inject handlers into nodes
-        const nodesWithHandlers = data.nodes.map((node) => ({
-          ...node,
-          data: {
-            ...node.data,
-            type: node.type,
-            onDelete: onDeleteNode,
-            onRename: onRenameNode,
-          },
-        }));
-
-        // Inject handlers and styling into edges
-        const edgesWithHandlers = data.edges.map((edge) => {
-          const isConditional = edge.id.includes('-cond') || !!edge.label;
-          return {
-            ...edge,
-            type: 'deletable',
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 20,
-              height: 20,
-              color: '#b1b1b7',
-            },
-            style: {
-              strokeWidth: 2,
-              stroke: '#b1b1b7',
-              ...edge.style,
-            },
-            data: {
-              ...edge.data,
-              isConditional,
-              label: edge.label || (isConditional ? 'Conditional Edge' : ''),
-              onDelete: onDeleteEdge,
-              onRenameLabel: onRenameEdgeLabel,
-            },
-          };
-        });
-
-        setNodes(nodesWithHandlers);
-        setEdges(edgesWithHandlers);
+        processGraphData(data);
       } catch (error) {
         console.error('Error fetching graph data:', error);
       }
     };
 
     fetchGraph();
-  }, [setNodes, setEdges, onDeleteNode, onRenameNode, onDeleteEdge, onRenameEdgeLabel]);
+  }, [processGraphData]);
+
+  const onUploadClick = () => {
+    document.getElementById('code-upload-input').click();
+  };
+
+  const onFileChange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/graph/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        alert(`Upload failed: ${errorData.detail}`);
+        return;
+      }
+
+      const data = await response.json();
+      processGraphData(data);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Error uploading file');
+    }
+    
+    // Reset input
+    event.target.value = '';
+  };
 
   const onConnect = useCallback(
     (params) => {
@@ -160,10 +197,29 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
+      {nodes.length === 0 && (
+        <div className="empty-state-container">
+          <h2>No Graph Detected</h2>
+          <p>Please upload your LangGraph code to get started.</p>
+          <button className="empty-state-upload-btn" onClick={onUploadClick}>
+            📁 Upload LangGraph Code
+          </button>
+        </div>
+      )}
       <div className="controls-container">
         <button className="add-node-btn" onClick={addNode}>
           + Add Node
         </button>
+        <button className="upload-btn" onClick={onUploadClick}>
+          📁 Upload Code
+        </button>
+        <input
+          type="file"
+          id="code-upload-input"
+          style={{ display: 'none' }}
+          accept=".py"
+          onChange={onFileChange}
+        />
       </div>
       <ReactFlow
         nodes={nodes}
