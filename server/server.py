@@ -4,9 +4,10 @@ import libcst as cst
 import os
 from pydantic import BaseModel
 from typing import Optional
+import traceback
 
 # Import our parser and transformer
-from libcst_learn.parser_libcst import LangGraphAnalyzer, ToolCallVisitor
+from parser_libcst import LangGraphAnalyzer, ToolCallVisitor
 from transform import transform_to_react_flow
 
 app = FastAPI()
@@ -32,6 +33,7 @@ class MutationRequest(BaseModel):
 async def get_graph():
     try:
         if not os.path.exists(AGENT_FILE):
+            traceback.print_exc()
             raise HTTPException(status_code=404, detail="agent.py not found")
             
         with open(AGENT_FILE, "r", encoding="utf8") as f:
