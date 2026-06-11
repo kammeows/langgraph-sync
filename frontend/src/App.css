@@ -12,3 +12,82 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+.editable-node-container {
+  padding: 10px;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid #ddd;
+  min-width: 120px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.editable-node-container.selected {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.editable-node-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.node-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  cursor: pointer;
+  flex-grow: 1;
+}
+
+.editable-node-body input {
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 2px 4px;
+  width: 100%;
+  outline: none;
+}
+
+.editable-node-container.agentNode {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.editable-node-container.toolNode {
+  background: #f0fdf4;
+  border-color: #22c55e;
+}
+
+.editable-node-container.subToolNode {
+  background: #fff7ed;
+  border-color: #f97316;
+}
+
+.delete-node-btn, .delete-edge-btn {
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.delete-node-btn:hover, .delete-edge-btn:hover {
+  background: #dc2626;
+}
+
+.delete-edge-btn {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
