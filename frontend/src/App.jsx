@@ -131,16 +131,40 @@ function App() {
           stroke: '#b1b1b7',
         },
         data: {
+          isConditional: false,
+          label: '',
           onDelete: onDeleteEdge,
+          onRenameLabel: onRenameEdgeLabel,
         },
       };
       setEdges((eds) => addEdge(newEdge, eds));
     },
-    [setEdges, onDeleteEdge],
+    [setEdges, onDeleteEdge, onRenameEdgeLabel],
   );
+
+  const addNode = useCallback(() => {
+    const id = `node_${Date.now()}`;
+    const newNode = {
+      id,
+      type: 'agentNode',
+      position: { x: Math.random() * 400, y: Math.random() * 400 },
+      data: {
+        label: 'Node',
+        type: 'agentNode',
+        onDelete: onDeleteNode,
+        onRename: onRenameNode,
+      },
+    };
+    setNodes((nds) => nds.concat(newNode));
+  }, [setNodes, onDeleteNode, onRenameNode]);
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
+      <div className="controls-container">
+        <button className="add-node-btn" onClick={addNode}>
+          + Add Node
+        </button>
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
