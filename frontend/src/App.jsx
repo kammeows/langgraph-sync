@@ -50,6 +50,17 @@ function App() {
     setEdges((eds) => eds.filter((edge) => edge.id !== id));
   }, [setEdges]);
 
+  const onRenameEdgeLabel = useCallback((id, newLabel) => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id === id) {
+          return { ...edge, data: { ...edge.data, label: newLabel } };
+        }
+        return edge;
+      })
+    );
+  }, [setEdges]);
+
   useEffect(() => {
     const fetchGraph = async () => {
       try {
@@ -68,24 +79,31 @@ function App() {
         }));
 
         // Inject handlers and styling into edges
-        const edgesWithHandlers = data.edges.map((edge) => ({
-          ...edge,
-          type: 'deletable',
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 20,
-            height: 20,
-            color: '#b1b1b7',
-          },
-          style: {
-            strokeWidth: 2,
-            stroke: '#b1b1b7',
-          },
-          data: {
-            ...edge.data,
-            onDelete: onDeleteEdge,
-          },
-        }));
+        const edgesWithHandlers = data.edges.map((edge) => {
+          const isConditional = edge.id.includes('-cond') || !!edge.label;
+          return {
+            ...edge,
+            type: 'deletable',
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 20,
+              height: 20,
+              color: '#b1b1b7',
+            },
+            style: {
+              strokeWidth: 2,
+              stroke: '#b1b1b7',
+              ...edge.style,
+            },
+            data: {
+              ...edge.data,
+              isConditional,
+              label: edge.label || (isConditional ? 'Conditional Edge' : ''),
+              onDelete: onDeleteEdge,
+              onRenameLabel: onRenameEdgeLabel,
+            },
+          };
+        });
 
         setNodes(nodesWithHandlers);
         setEdges(edgesWithHandlers);
@@ -95,7 +113,7 @@ function App() {
     };
 
     fetchGraph();
-  }, [setNodes, setEdges, onDeleteNode, onRenameNode, onDeleteEdge]);
+  }, [setNodes, setEdges, onDeleteNode, onRenameNode, onDeleteEdge, onRenameEdgeLabel]);
 
   const onConnect = useCallback(
     (params) => {
