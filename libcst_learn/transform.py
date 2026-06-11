@@ -1,6 +1,6 @@
 import json
 import libcst as cst
-from parser_libcst import LangGraphAnalyzer, ToolCallVisitor
+from libcst_learn.parser_libcst import LangGraphAnalyzer, ToolCallVisitor
 
 def transform_to_react_flow(analyzer, tool_visitor):
     nodes = []

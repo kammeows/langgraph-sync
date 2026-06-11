@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 # Import our parser and transformer
-from parser_libcst import LangGraphAnalyzer, ToolCallVisitor
+from libcst_learn.parser_libcst import LangGraphAnalyzer, ToolCallVisitor
 from transform import transform_to_react_flow
 
 app = FastAPI()
