@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -9,6 +9,7 @@ import {
   addEdge,
   MarkerType,
 } from '@xyflow/react';
+import Editor from '@monaco-editor/react';
 
 import EditableNode from './components/EditableNode';
 import DeletableEdge from './components/DeletableEdge';
@@ -29,6 +30,8 @@ const edgeTypes = {
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [code, setCode] = useState('');
+  const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
 
   const onDeleteNode = useCallback((id) => {
     setNodes((nds) => nds.filter((node) => node.id !== id));
@@ -102,6 +105,9 @@ function App() {
 
     setNodes(nodesWithHandlers);
     setEdges(edgesWithHandlers);
+    if (data.code !== undefined) {
+      setCode(data.code);
+    }
   }, [onDeleteNode, onRenameNode, onDeleteEdge, onRenameEdgeLabel, setNodes, setEdges]);
 
   useEffect(() => {
@@ -196,45 +202,77 @@ function App() {
   }, [setNodes, onDeleteNode, onRenameNode]);
 
   return (
-    <div style={{ width: '100vw', height: '100vh' }}>
-      {nodes.length === 0 && (
-        <div className="empty-state-container">
-          <h2>No Graph Detected</h2>
-          <p>Please upload your LangGraph code to get started.</p>
-          <button className="empty-state-upload-btn" onClick={onUploadClick}>
-            📁 Upload LangGraph Code
+    <div className="main-container">
+      <div className="graph-container">
+        {nodes.length === 0 && (
+          <div className="empty-state-container">
+            <h2>No Graph Detected</h2>
+            <p>Please upload your LangGraph code to get started.</p>
+            <button className="empty-state-upload-btn" onClick={onUploadClick}>
+              📁 Upload LangGraph Code
+            </button>
+          </div>
+        )}
+        <div className="controls-container">
+          <button className="add-node-btn" onClick={addNode}>
+            + Add Node
           </button>
+          <button className="upload-btn" onClick={onUploadClick}>
+            📁 Upload Code
+          </button>
+          <input
+            type="file"
+            id="code-upload-input"
+            style={{ display: 'none' }}
+            accept=".py"
+            onChange={onFileChange}
+          />
         </div>
-      )}
-      <div className="controls-container">
-        <button className="add-node-btn" onClick={addNode}>
-          + Add Node
+
+        <button 
+          className="toggle-editor-btn" 
+          onClick={() => setIsEditorCollapsed(!isEditorCollapsed)}
+        >
+          {isEditorCollapsed ? '← Show Code' : 'Hide Code →'}
         </button>
-        <button className="upload-btn" onClick={onUploadClick}>
-          📁 Upload Code
-        </button>
-        <input
-          type="file"
-          id="code-upload-input"
-          style={{ display: 'none' }}
-          accept=".py"
-          onChange={onFileChange}
-        />
+
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+        >
+          <Controls />
+          <MiniMap />
+          <Background variant="dots" gap={12} size={1} />
+        </ReactFlow>
       </div>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-      >
-        <Controls />
-        <MiniMap />
-        <Background variant="dots" gap={12} size={1} />
-      </ReactFlow>
+
+      <div className={`editor-sidebar ${isEditorCollapsed ? 'collapsed' : ''}`}>
+        <div className="editor-header">
+          <span>Source Code</span>
+        </div>
+        <div className="monaco-editor-wrapper">
+          <Editor
+            height="100%"
+            defaultLanguage="python"
+            theme="vs-dark"
+            value={code}
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

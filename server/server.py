@@ -40,6 +40,8 @@ def parse_code_to_graph(source_code: str):
         module.visit(tool_visitor)
 
         flow_data = transform_to_react_flow(analyzer, tool_visitor)
+        # Include source code in the response
+        flow_data["code"] = source_code
         return flow_data
     except Exception as e:
         traceback.print_exc()
@@ -49,7 +51,7 @@ def parse_code_to_graph(source_code: str):
 async def get_graph():
     try:
         if not os.path.exists(AGENT_FILE):
-            return {"nodes": [], "edges": []}
+            return {"nodes": [], "edges": [], "code": ""}
             
         with open(AGENT_FILE, "r", encoding="utf8") as f:
             source_code = f.read()
