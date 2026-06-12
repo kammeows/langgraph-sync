@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -8,14 +8,14 @@ import {
   useEdgesState,
   addEdge,
   MarkerType,
-} from '@xyflow/react';
-import Editor from '@monaco-editor/react';
+} from "@xyflow/react";
+import Editor from "@monaco-editor/react";
 
-import EditableNode from './components/EditableNode';
-import DeletableEdge from './components/DeletableEdge';
+import EditableNode from "./components/EditableNode";
+import DeletableEdge from "./components/DeletableEdge";
 
-import '@xyflow/react/dist/style.css';
-import './App.css';
+import "@xyflow/react/dist/style.css";
+import "./App.css";
 
 const nodeTypes = {
   agentNode: EditableNode,
@@ -30,94 +30,124 @@ const edgeTypes = {
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
 
-  const onDeleteNode = useCallback((id) => {
-    setNodes((nds) => nds.filter((node) => node.id !== id));
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
-  }, [setNodes, setEdges]);
+  const onDeleteNode = useCallback(
+    (id) => {
+      setNodes((nds) => nds.filter((node) => node.id !== id));
+      setEdges((eds) =>
+        eds.filter((edge) => edge.source !== id && edge.target !== id),
+      );
+    },
+    [setNodes, setEdges],
+  );
 
-  const onRenameNode = useCallback((id, newLabel) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id === id) {
-          return { ...node, data: { ...node.data, label: newLabel } };
-        }
-        return node;
-      })
-    );
-  }, [setNodes]);
+  const onRenameNode = useCallback(
+    (id, newLabel) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === id) {
+            return { ...node, data: { ...node.data, label: newLabel } };
+          }
+          return node;
+        }),
+      );
+    },
+    [setNodes],
+  );
 
-  const onDeleteEdge = useCallback((id) => {
-    setEdges((eds) => eds.filter((edge) => edge.id !== id));
-  }, [setEdges]);
+  const onDeleteEdge = useCallback(
+    (id) => {
+      setEdges((eds) => eds.filter((edge) => edge.id !== id));
+    },
+    [setEdges],
+  );
 
-  const onRenameEdgeLabel = useCallback((id, newLabel) => {
-    setEdges((eds) =>
-      eds.map((edge) => {
-        if (edge.id === id) {
-          return { ...edge, data: { ...edge.data, label: newLabel } };
-        }
-        return edge;
-      })
-    );
-  }, [setEdges]);
+  const onRenameEdgeLabel = useCallback(
+    (id, newLabel) => {
+      setEdges((eds) =>
+        eds.map((edge) => {
+          if (edge.id === id) {
+            return { ...edge, data: { ...edge.data, label: newLabel } };
+          }
+          return edge;
+        }),
+      );
+    },
+    [setEdges],
+  );
 
-  const processGraphData = useCallback((data) => {
-    // Inject handlers into nodes
-    const nodesWithHandlers = data.nodes.map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        type: node.type,
-        onDelete: onDeleteNode,
-        onRename: onRenameNode,
-      },
-    }));
+  const processGraphData = useCallback(
+    (data) => {
+      console.log("Received graph data:", data);
 
-    // Inject handlers and styling into edges
-    const edgesWithHandlers = data.edges.map((edge) => {
-      const isConditional = edge.id.includes('-cond') || !!edge.label;
-      return {
-        ...edge,
-        type: 'deletable',
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 20,
-          height: 20,
-          color: '#b1b1b7',
-        },
-        style: {
-          strokeWidth: 2,
-          stroke: '#b1b1b7',
-          ...edge.style,
-        },
+      // Inject handlers into nodes
+      const nodesWithHandlers = data.nodes.map((node) => ({
+        ...node,
         data: {
-          ...edge.data,
-          isConditional,
-          label: edge.label || (isConditional ? 'Conditional Edge' : ''),
-          onDelete: onDeleteEdge,
-          onRenameLabel: onRenameEdgeLabel,
+          ...node.data,
+          type: node.type,
+          onDelete: onDeleteNode,
+          onRename: onRenameNode,
         },
-      };
-    });
+      }));
 
-    setNodes(nodesWithHandlers);
-    setEdges(edgesWithHandlers);
-    if (data.code !== undefined) {
-      setCode(data.code);
-    }
-  }, [onDeleteNode, onRenameNode, onDeleteEdge, onRenameEdgeLabel, setNodes, setEdges]);
+      // Inject handlers and styling into edges
+      const edgesWithHandlers = data.edges.map((edge) => {
+        const isConditional = edge.id.includes("-cond") || !!edge.label;
+        return {
+          ...edge,
+          type: "deletable",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 20,
+            height: 20,
+            color: "#b1b1b7",
+          },
+          style: {
+            strokeWidth: 2,
+            stroke: "#b1b1b7",
+            ...edge.style,
+          },
+          data: {
+            ...edge.data,
+            isConditional,
+            label: edge.label || (isConditional ? "Conditional Edge" : ""),
+            onDelete: onDeleteEdge,
+            onRenameLabel: onRenameEdgeLabel,
+          },
+        };
+      });
+
+      setNodes(nodesWithHandlers);
+      setEdges(edgesWithHandlers);
+
+      if (data.code !== undefined) {
+        console.log("Setting code state, length:", data.code.length);
+        console.log(JSON.stringify(data.code));
+        setCode(data.code);
+      }
+    },
+    [
+      onDeleteNode,
+      onRenameNode,
+      onDeleteEdge,
+      onRenameEdgeLabel,
+      setNodes,
+      setEdges,
+      setCode,
+    ],
+  );
 
   useEffect(() => {
     const fetchGraph = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/graph');
+        const response = await fetch("http://localhost:8000/api/graph");
         const data = await response.json();
         processGraphData(data);
       } catch (error) {
-        console.error('Error fetching graph data:', error);
+        console.error("Error fetching graph data:", error);
       }
     };
 
@@ -125,7 +155,7 @@ function App() {
   }, [processGraphData]);
 
   const onUploadClick = () => {
-    document.getElementById('code-upload-input').click();
+    document.getElementById("code-upload-input").click();
   };
 
   const onFileChange = async (event) => {
@@ -133,14 +163,14 @@ function App() {
     if (!file) return;
 
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
-      const response = await fetch('http://localhost:8000/api/graph/upload', {
-        method: 'POST',
+      const response = await fetch("http://localhost:8000/api/graph/upload", {
+        method: "POST",
         body: formData,
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         alert(`Upload failed: ${errorData.detail}`);
@@ -150,32 +180,31 @@ function App() {
       const data = await response.json();
       processGraphData(data);
     } catch (error) {
-      console.error('Error uploading file:', error);
-      alert('Error uploading file');
+      console.error("Error uploading file:", error);
+      alert("Error uploading file");
     }
-    
-    // Reset input
-    event.target.value = '';
+
+    event.target.value = "";
   };
 
   const onConnect = useCallback(
     (params) => {
       const newEdge = {
         ...params,
-        type: 'deletable',
+        type: "deletable",
         markerEnd: {
           type: MarkerType.ArrowClosed,
           width: 20,
           height: 20,
-          color: '#b1b1b7',
+          color: "#b1b1b7",
         },
         style: {
           strokeWidth: 2,
-          stroke: '#b1b1b7',
+          stroke: "#b1b1b7",
         },
         data: {
           isConditional: false,
-          label: '',
+          label: "",
           onDelete: onDeleteEdge,
           onRenameLabel: onRenameEdgeLabel,
         },
@@ -189,11 +218,11 @@ function App() {
     const id = `node_${Date.now()}`;
     const newNode = {
       id,
-      type: 'agentNode',
+      type: "agentNode",
       position: { x: Math.random() * 400, y: Math.random() * 400 },
       data: {
-        label: 'Node',
-        type: 'agentNode',
+        label: "Node",
+        type: "agentNode",
         onDelete: onDeleteNode,
         onRename: onRenameNode,
       },
@@ -223,17 +252,17 @@ function App() {
           <input
             type="file"
             id="code-upload-input"
-            style={{ display: 'none' }}
+            style={{ display: "none" }}
             accept=".py"
             onChange={onFileChange}
           />
         </div>
 
-        <button 
-          className="toggle-editor-btn" 
+        <button
+          className="toggle-editor-btn"
           onClick={() => setIsEditorCollapsed(!isEditorCollapsed)}
         >
-          {isEditorCollapsed ? '← Show Code' : 'Hide Code →'}
+          {isEditorCollapsed ? "← Show Code" : "Hide Code →"}
         </button>
 
         <ReactFlow
@@ -252,21 +281,22 @@ function App() {
         </ReactFlow>
       </div>
 
-      <div className={`editor-sidebar ${isEditorCollapsed ? 'collapsed' : ''}`}>
+      <div className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}>
         <div className="editor-header">
           <span>Source Code</span>
         </div>
         <div className="monaco-editor-wrapper">
           <Editor
             height="100%"
-            defaultLanguage="python"
+            language="python"
+            // defaultLanguage="python"
             theme="vs-dark"
             value={code}
             options={{
               readOnly: true,
               minimap: { enabled: false },
               fontSize: 14,
-              lineNumbers: 'on',
+              lineNumbers: "on",
               scrollBeyondLastLine: false,
               automaticLayout: true,
             }}

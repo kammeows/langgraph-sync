@@ -132,13 +132,11 @@ def router_agent(state: AgentState):
 
 def research_agent(state: AgentState):
 
-    prompt = f"""
-Research this topic:
-
-{state['query']}
-
-Provide key facts and context.
-"""
+    prompt = (
+    f"Research this topic:\n\n"
+    f"{state['query']}\n\n"
+    f"Provide key facts and context."
+)
 
     result = llm.invoke(prompt)
 
@@ -181,19 +179,13 @@ def tool_agent(state: AgentState):
 # ---------------------------------
 
 def analyst_agent(state: AgentState):
-
-    prompt = f"""
-User Query:
-{state['query']}
-
-Research:
-{state.get('research_notes', '')}
-
-Tool Output:
-{state['tool_output']}
-
-Create an analysis.
-"""
+    
+    prompt = (
+    f"User Query: {state['query']}\n\n"
+    f"Research: {state.get('research_notes', '')}\n\n"
+    f"Tool Output: {state['tool_output']}\n\n"
+    f"Create an analysis."
+)
 
     result = llm.invoke(prompt)
 
@@ -209,13 +201,11 @@ Create an analysis.
 
 def report_agent(state: AgentState):
 
-    prompt = f"""
-Generate a final report.
-
-Analysis:
-
-{state['analysis']}
-"""
+    prompt = (
+    f"Generate a final report.\n\n"
+    f"Analysis:\n\n"
+    f"{state['analysis']}"
+)
 
     result = llm.invoke(prompt)
 
