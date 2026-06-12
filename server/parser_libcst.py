@@ -3,9 +3,12 @@ from libcst import matchers as m
 
 
 class LangGraphAnalyzer(cst.CSTVisitor):
+    METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
     def __init__(self):
+        super().__init__()
         self.functions = []
+        self.function_lines = {} # New: store {func_name: (start_line, end_line)}
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
@@ -15,7 +18,14 @@ class LangGraphAnalyzer(cst.CSTVisitor):
     # ----------------------------------
 
     def visit_FunctionDef(self, node: cst.FunctionDef):
-        self.functions.append(node.name.value)
+        func_name = node.name.value
+        self.functions.append(func_name)
+        
+        # Capture line numbers using metadata
+        pos = self.get_metadata(cst.metadata.PositionProvider, node)
+        start_line = pos.start.line
+        end_line = pos.end.line
+        self.function_lines[func_name] = (start_line, end_line)
 
     # ----------------------------------
     # Collect builder.add_node(...)
@@ -166,15 +176,17 @@ if __name__ == "__main__":
             source = f.read()
 
         module = cst.parse_module(source)
+        wrapper = cst.metadata.MetadataWrapper(module)
 
         analyzer = LangGraphAnalyzer()
-        module.visit(analyzer)
+        wrapper.visit(analyzer)
 
         tool_visitor = ToolCallVisitor()
         module.visit(tool_visitor)
 
-        print("\nFUNCTIONS")
-        print(analyzer.functions)
+        print("\nFUNCTIONS (with lines)")
+        for func in analyzer.functions:
+            print(f"{func}: {analyzer.function_lines.get(func)}")
 
         print("\nGRAPH NODES")
         print(analyzer.nodes)

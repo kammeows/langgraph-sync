@@ -16,14 +16,23 @@ def transform_to_react_flow(analyzer, tool_visitor):
     for node_id, func_name in node_to_function.items():
         # Determine type
         node_type = "agentNode"
-        if "tool" in node_id.lower() or "tool" in func_name.lower():
+        if node_id and ("tool" in node_id.lower()):
             node_type = "toolNode"
+        elif func_name and ("tool" in func_name.lower()):
+            node_type = "toolNode"
+            
+        # Get line numbers if available
+        line_info = analyzer.function_lines.get(func_name) if func_name else None
             
         nodes.append({
             "id": node_id,
             "type": node_type,
             "position": {"x": 100 if node_type == "agentNode" else 300, "y": y_offset},
-            "data": {"label": f"{node_id} ({func_name})"}
+            "data": {
+                "label": f"{node_id} ({func_name})" if func_name else node_id,
+                "functionName": func_name,
+                "lines": line_info
+            }
         })
         y_offset += 150
 
@@ -44,11 +53,18 @@ def transform_to_react_flow(analyzer, tool_visitor):
             # If it's a defined function but not an agent, it's a subtool
             if called in analyzer.functions and called not in agent_functions:
                 if called not in processed_subtools:
+                    # Get line numbers for subtool
+                    sub_line_info = analyzer.function_lines.get(called)
+
                     nodes.append({
                         "id": called,
                         "type": "subToolNode",
                         "position": {"x": 500, "y": sub_tool_y},
-                        "data": {"label": called}
+                        "data": {
+                            "label": called,
+                            "functionName": called,
+                            "lines": sub_line_info
+                        }
                     })
                     processed_subtools.add(called)
                     sub_tool_y += 100

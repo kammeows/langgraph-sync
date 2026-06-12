@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -32,6 +32,54 @@ function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
+  const editorRef = useRef(null);
+
+  const handleEditorDidMount = (editor, monaco) => {
+    editorRef.current = editor;
+  };
+
+  const onNodeClick = useCallback(
+    (event, node) => {
+      console.log("Node clicked data:", node.data);
+      if (node.data && node.data.lines && editorRef.current) {
+        const [startLine, endLine] = node.data.lines;
+        console.log(`Highlighting lines ${startLine} to ${endLine}`);
+
+        // Reveal the start line in the center of the editor
+        editorRef.current.revealLineInCenter(startLine);
+
+        // Set selection to highlight the code range
+        const model = editorRef.current.getModel();
+        const maxColumn = model.getLineMaxColumn(endLine);
+
+        editorRef.current.setSelection({
+          startLineNumber: startLine,
+          startColumn: 1,
+          endLineNumber: endLine,
+          endColumn: maxColumn,
+        });
+
+        // Expand sidebar if it's collapsed
+        if (isEditorCollapsed) {
+          setIsEditorCollapsed(false);
+        }
+      } else if (node.data && node.data.functionName && editorRef.current) {
+        console.log("Lines missing, searching for functionName:", node.data.functionName);
+        const model = editorRef.current.getModel();
+        const matches = model.findMatches(`def ${node.data.functionName}`, true, false, true, null, true);
+        
+        if (matches.length > 0) {
+          const match = matches[0];
+          editorRef.current.revealLineInCenter(match.range.startLineNumber);
+          editorRef.current.setSelection(match.range);
+          if (isEditorCollapsed) setIsEditorCollapsed(false);
+        }
+      } else {
+        console.warn("No line data or function name found for node:", node.id);
+      }
+    },
+    [isEditorCollapsed],
+  );
 
   const onDeleteNode = useCallback(
     (id) => {
@@ -271,6 +319,7 @@ function App() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeClick={onNodeClick}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
@@ -292,6 +341,7 @@ function App() {
             // defaultLanguage="python"
             theme="vs-dark"
             value={code}
+            onMount={handleEditorDidMount}
             options={{
               readOnly: true,
               minimap: { enabled: false },

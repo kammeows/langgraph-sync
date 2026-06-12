@@ -32,9 +32,10 @@ class MutationRequest(BaseModel):
 def parse_code_to_graph(source_code: str):
     try:
         module = cst.parse_module(source_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
 
         analyzer = LangGraphAnalyzer()
-        module.visit(analyzer)
+        wrapper.visit(analyzer)
 
         tool_visitor = ToolCallVisitor()
         module.visit(tool_visitor)
