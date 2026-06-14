@@ -48,7 +48,14 @@ const EditableNode = ({ data, id, selected }) => {
             autoFocus
           />
         ) : (
-          <div className="node-label" onDoubleClick={() => setIsEditing(true)}>
+          <div 
+            className="node-label" 
+            onDoubleClick={() => {
+              if (data.isEditable !== false) {
+                setIsEditing(true);
+              }
+            }}
+          >
             {label}
           </div>
         )}

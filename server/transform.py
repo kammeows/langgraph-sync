@@ -31,51 +31,54 @@ def transform_to_react_flow(analyzer, tool_visitor):
             "data": {
                 "label": node_id,
                 "functionName": func_name,
-                "lines": line_info
+                "lines": line_info,
+                "isEditable": True
             }
         })
         y_offset += 150
 
-    # 2. Process Sub-Tool Nodes
-    # Find functions called by agents that are not agents themselves
-    sub_tool_y = 100
-    processed_subtools = set()
-    
-    for agent_func, called_funcs in tool_visitor.calls.items():
-        # Only look at agents that are actually nodes
-        if agent_func not in agent_functions:
-            continue
-            
-        # Get the node_id for this function
-        agent_node_id = next(nid for nid, fname in node_to_function.items() if fname == agent_func)
-        
-        for called in called_funcs:
-            # If it's a defined function but not an agent, it's a subtool
-            if called in analyzer.functions and called not in agent_functions:
-                if called not in processed_subtools:
-                    # Get line numbers for subtool
-                    sub_line_info = analyzer.function_lines.get(called)
+        # 2. Process Sub-Tool Nodes
+        # Find functions called by agents that are not agents themselves
+        sub_tool_y = 100
+        processed_subtools = set()
 
-                    nodes.append({
-                        "id": called,
-                        "type": "subToolNode",
-                        "position": {"x": 500, "y": sub_tool_y},
-                        "data": {
-                            "label": called,
-                            "functionName": called,
-                            "lines": sub_line_info
-                        }
+        for agent_func, called_funcs in tool_visitor.calls.items():
+        # Only look at agents that are actually nodes
+            if agent_func not in agent_functions:
+                continue
+
+            # Get the node_id for this function
+            agent_node_id = next(nid for nid, fname in node_to_function.items() if fname == agent_func)
+
+            for called in called_funcs:
+                # If it's a defined function but not an agent, it's a subtool
+                if called in analyzer.functions and called not in agent_functions:
+                    if called not in processed_subtools:
+                        # Get line numbers for subtool
+                        sub_line_info = analyzer.function_lines.get(called)
+
+                        nodes.append({
+                            "id": called,
+                            "type": "subToolNode",
+                            "position": {"x": 500, "y": sub_tool_y},
+                            "data": {
+                                "label": called,
+                                "functionName": called,
+                                "lines": sub_line_info,
+                                "isEditable": False
+                            }
+                        })
+
+                        processed_subtools.add(called)
+                        sub_tool_y += 100
+                    
+                    # Add edge from agent to subtool
+                    edges.append({
+                        "id": f"e-{agent_node_id}-{called}",
+                        "source": agent_node_id,
+                        "target": called,
+                        "animated": True
                     })
-                    processed_subtools.add(called)
-                    sub_tool_y += 100
-                
-                # Add edge from agent to subtool
-                edges.append({
-                    "id": f"e-{agent_node_id}-{called}",
-                    "source": agent_node_id,
-                    "target": called,
-                    "animated": True
-                })
 
     # 3. Process Standard Edges
     for src, dst in analyzer.edges:

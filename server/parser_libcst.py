@@ -205,6 +205,18 @@ class RenameNodeTransformer(cst.CSTTransformer):
             if changed:
                 return updated_node.with_changes(args=new_args)
 
+        # Handle builder.set_entry_point("old_id")
+        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))):
+            if len(updated_node.args) >= 1:
+                arg = updated_node.args[0].value
+                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
+                    new_arg = updated_node.args[0].with_changes(
+                        value=cst.SimpleString(f'"{self.new_id}"')
+                    )
+                    new_args = list(updated_node.args)
+                    new_args[0] = new_arg
+                    return updated_node.with_changes(args=new_args)
+
         return updated_node
 
     def leave_DictElement(self, original_node: cst.DictElement, updated_node: cst.DictElement):
