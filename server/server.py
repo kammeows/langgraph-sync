@@ -7,7 +7,7 @@ from typing import Optional
 import traceback
 
 # Import our parser and transformer
-from parser_libcst import LangGraphAnalyzer, ToolCallVisitor, RenameNodeTransformer
+from parser_libcst import LangGraphAnalyzer, ToolCallVisitor, RenameNodeTransformer, add_node_to_code
 from transform import transform_to_react_flow
 
 app = FastAPI()
@@ -109,6 +109,33 @@ async def mutate_graph(request: MutationRequest):
         except Exception as e:
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Rename failed: {str(e)}")
+
+    if request.action == "add_node":
+        try:
+            with open(AGENT_FILE, "r", encoding="utf8") as f:
+                source_code = f.read()
+            
+            # Find a unique name like node1, node2...
+            # We can parse it quickly to find existing ones
+            module = cst.parse_module(source_code)
+            analyzer = LangGraphAnalyzer()
+            cst.metadata.MetadataWrapper(module).visit(analyzer)
+            
+            existing_nodes = set(analyzer.nodes.keys())
+            index = 1
+            while f"node{index}" in existing_nodes:
+                index += 1
+            
+            new_node_id = f"node{index}"
+            updated_code = add_node_to_code(source_code, new_node_id)
+            
+            with open(AGENT_FILE, "w", encoding="utf8") as f:
+                f.write(updated_code)
+                
+            return parse_code_to_graph(updated_code)
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Add node failed: {str(e)}")
 
     return {"status": "success", "received": request.action}
 

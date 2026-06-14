@@ -225,6 +225,86 @@ class RenameNodeTransformer(cst.CSTTransformer):
             return updated_node.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
         return updated_node
 
+def add_node_to_code(source_code: str, node_name: str) -> str:
+    module = cst.parse_module(source_code)
+    
+    # 1. Create the function definition
+    # def node_name(state: AgentState):
+    #     return {}
+    func_def = cst.FunctionDef(
+        name=cst.Name(node_name),
+        params=cst.Parameters(
+            params=[
+                cst.Param(
+                    name=cst.Name("state"),
+                    annotation=cst.Annotation(annotation=cst.Name("AgentState"))
+                )
+            ]
+        ),
+        body=cst.IndentedBlock(
+            body=[
+                cst.SimpleStatementLine(
+                    body=[
+                        cst.Return(
+                            value=cst.Dict(elements=[])
+                        )
+                    ]
+                )
+            ]
+        ),
+        leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
+    )
+    
+    # 2. Create the builder.add_node call
+    # builder.add_node("node_name", node_name)
+    call_stmt = cst.SimpleStatementLine(
+        body=[
+            cst.Expr(
+                value=cst.Call(
+                    func=cst.Attribute(
+                        value=cst.Name("builder"),
+                        attr=cst.Name("add_node")
+                    ),
+                    args=[
+                        cst.Arg(cst.SimpleString(f'"{node_name}"')),
+                        cst.Arg(cst.Name(node_name))
+                    ]
+                )
+            )
+        ]
+    )
+
+    new_body = list(module.body)
+    
+    # Find insertion points
+    builder_assign_idx = -1
+    last_add_node_idx = -1
+    
+    for i, stmt in enumerate(new_body):
+        # Match builder = StateGraph(...)
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
+            builder_assign_idx = i
+        
+        # Match builder.add_node(...)
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node")))])):
+            last_add_node_idx = i
+
+    if builder_assign_idx != -1:
+        # Insert function before builder assignment
+        new_body.insert(builder_assign_idx, func_def)
+        
+        # Adjust indices as body changed
+        if last_add_node_idx != -1:
+            shifted_last_idx = last_add_node_idx + 1
+            new_body.insert(shifted_last_idx + 1, call_stmt)
+        else:
+            new_body.insert(builder_assign_idx + 2, call_stmt)
+    else:
+        new_body.append(func_def)
+        new_body.append(call_stmt)
+        
+    return module.with_changes(body=new_body).code
+
 if __name__ == "__main__":
     import os
     

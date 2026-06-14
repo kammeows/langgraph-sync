@@ -296,21 +296,27 @@ function App() {
     [setEdges, onDeleteEdge, onRenameEdgeLabel],
   );
 
-  const addNode = useCallback(() => {
-    const id = `node_${Date.now()}`;
-    const newNode = {
-      id,
-      type: "agentNode",
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
-      data: {
-        label: "Node",
-        type: "agentNode",
-        onDelete: onDeleteNode,
-        onRename: onRenameNode,
-      },
-    };
-    setNodes((nds) => nds.concat(newNode));
-  }, [setNodes, onDeleteNode, onRenameNode]);
+  const addNode = useCallback(async () => {
+    try {
+      const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_node",
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        processGraphData(data);
+      } else {
+        const error = await response.json();
+        console.error("Add node failed:", error.detail);
+      }
+    } catch (error) {
+      console.error("Error adding node:", error);
+    }
+  }, [processGraphData]);
 
   return (
     <div className="main-container">
