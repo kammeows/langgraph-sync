@@ -29,7 +29,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
             "type": node_type,
             "position": {"x": 100 if node_type == "agentNode" else 300, "y": y_offset},
             "data": {
-                "label": f"{node_id} ({func_name})" if func_name else node_id,
+                "label": node_id,
                 "functionName": func_name,
                 "lines": line_info
             }
