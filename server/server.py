@@ -7,7 +7,14 @@ from typing import Optional
 import traceback
 
 # Import our parser and transformer
-from parser_libcst import LangGraphAnalyzer, ToolCallVisitor, RenameNodeTransformer, add_node_to_code
+from parser_libcst import (
+    LangGraphAnalyzer, 
+    ToolCallVisitor, 
+    RenameNodeTransformer, 
+    RemoveEdgeTransformer,
+    add_node_to_code,
+    add_edge_to_code
+)
 from transform import transform_to_react_flow
 
 app = FastAPI()
@@ -93,29 +100,20 @@ async def upload_code(file: UploadFile = File(...)):
 async def mutate_graph(request: MutationRequest):
     print(f"Mutation received: {request.action}")
     
-    if request.action == "rename":
-        try:
-            with open(AGENT_FILE, "r", encoding="utf8") as f:
-                source_code = f.read()
-            
+    if not os.path.exists(AGENT_FILE):
+         raise HTTPException(status_code=404, detail="agent.py not found")
+
+    with open(AGENT_FILE, "r", encoding="utf8") as f:
+        source_code = f.read()
+    
+    try:
+        if request.action == "rename":
             module = cst.parse_module(source_code)
             transformer = RenameNodeTransformer(request.node_id, request.new_id)
             new_module = module.visit(transformer)
-            
-            with open(AGENT_FILE, "w", encoding="utf8") as f:
-                f.write(new_module.code)
-                
-            return parse_code_to_graph(new_module.code)
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Rename failed: {str(e)}")
+            updated_code = new_module.code
 
-    if request.action == "add_node":
-        try:
-            with open(AGENT_FILE, "r", encoding="utf8") as f:
-                source_code = f.read()
-            
-            # Find a unique name
+        elif request.action == "add_node":
             module = cst.parse_module(source_code)
             analyzer = LangGraphAnalyzer()
             cst.metadata.MetadataWrapper(module).visit(analyzer)
@@ -124,27 +122,44 @@ async def mutate_graph(request: MutationRequest):
 
             if request.new_id:
                 if request.new_id in existing_nodes or request.new_id in existing_functions:
-                    raise HTTPException(status_code=400, detail=f"Name '{request.new_id}' already exists as a node or function.")
+                    raise HTTPException(status_code=400, detail=f"Name '{request.new_id}' already exists.")
                 new_node_id = request.new_id
             else:
                 index = 1
-                while f"node{index}" in existing_nodes:
-                    index += 1
+                while f"node{index}" in existing_nodes: index += 1
                 new_node_id = f"node{index}"
             
             updated_code = add_node_to_code(source_code, new_node_id)
-            
-            with open(AGENT_FILE, "w", encoding="utf8") as f:
-                f.write(updated_code)
-                
-            return parse_code_to_graph(updated_code)
-        except HTTPException:
-            raise
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Add node failed: {str(e)}")
 
-    return {"status": "success", "received": request.action}
+        elif request.action == "add_edge":
+            # Check for duplication first
+            module = cst.parse_module(source_code)
+            analyzer = LangGraphAnalyzer()
+            cst.metadata.MetadataWrapper(module).visit(analyzer)
+            
+            if (request.source, request.target) in analyzer.edges:
+                return parse_code_to_graph(source_code)
+            
+            updated_code = add_edge_to_code(source_code, request.source, request.target)
+
+        elif request.action == "delete_edge":
+            module = cst.parse_module(source_code)
+            transformer = RemoveEdgeTransformer(request.source, request.target)
+            new_module = module.visit(transformer)
+            updated_code = new_module.code
+
+        else:
+            return {"status": "success", "received": request.action}
+
+        with open(AGENT_FILE, "w", encoding="utf8") as f:
+            f.write(updated_code)
+            
+        return parse_code_to_graph(updated_code)
+
+    except HTTPException: raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

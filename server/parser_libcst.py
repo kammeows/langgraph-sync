@@ -71,18 +71,20 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 src = node.args[0].value
                 dst = node.args[1].value
 
-                if (
-                    isinstance(src, cst.SimpleString)
-                    and isinstance(dst, cst.SimpleString)
-                ):
+                src_val = None
+                dst_val = None
 
-                    self.edges.append(
-                        (
-                            src.evaluated_value,
-                            dst.evaluated_value,
-                        )
-                    )
+                if isinstance(src, cst.SimpleString):
+                    src_val = src.evaluated_value
 
+                if isinstance(dst, cst.SimpleString):
+                    dst_val = dst.evaluated_value
+                elif isinstance(dst, cst.Name) and dst.value == "END":
+                    dst_val = "__end__"
+
+                if src_val and dst_val:
+                    self.edges.append((src_val, dst_val))
+        
         # ----------------------------------
         # builder.add_conditional_edges(...)
         # ----------------------------------
@@ -133,6 +135,83 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         "mapping": mapping
                     }
                 )
+
+class RemoveEdgeTransformer(cst.CSTTransformer):
+    def __init__(self, src: str, dst: str):
+        self.src = src
+        self.dst = dst
+
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+            expr = updated_node.body[0]
+            call = expr.value
+            if len(call.args) >= 2:
+                arg0 = call.args[0].value
+                arg1 = call.args[1].value
+                
+                match_src = isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src
+                
+                match_dst = False
+                if isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.dst:
+                    match_dst = True
+                elif isinstance(arg1, cst.Name) and arg1.value == "END" and self.dst == "__end__":
+                    match_dst = True
+                
+                if match_src and match_dst:
+                    return cst.RemoveFromParent()
+        return updated_node
+
+def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
+    module = cst.parse_module(source_code)
+    
+    # Create builder.add_edge("src", "dst" or END)
+    dst_node = cst.Name("END") if dst == "__end__" else cst.SimpleString(f'"{dst}"')
+    
+    edge_stmt = cst.SimpleStatementLine(
+        body=[
+            cst.Expr(
+                value=cst.Call(
+                    func=cst.Attribute(
+                        value=cst.Name("builder"),
+                        attr=cst.Name("add_edge")
+                    ),
+                    args=[
+                        cst.Arg(cst.SimpleString(f'"{src}"')),
+                        cst.Arg(dst_node)
+                    ]
+                )
+            )
+        ]
+    )
+
+    new_body = list(module.body)
+    last_edge_idx = -1
+    builder_assign_idx = -1
+
+    for i, stmt in enumerate(new_body):
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+            last_edge_idx = i
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
+            builder_assign_idx = i
+
+    if last_edge_idx != -1:
+        new_body.insert(last_edge_idx + 1, edge_stmt)
+    elif builder_assign_idx != -1:
+        # If no edges yet, put it after builder.add_node calls or just after builder init
+        # Finding last add_node would be better
+        last_node_idx = -1
+        for i, stmt in enumerate(new_body):
+             if m.matches(stmt, m.SimpleStatementLine(body=[m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node")))])):
+                 last_node_idx = i
+        
+        if last_node_idx != -1:
+            new_body.insert(last_node_idx + 1, edge_stmt)
+        else:
+            new_body.insert(builder_assign_idx + 1, edge_stmt)
+    else:
+        new_body.append(edge_stmt)
+
+    return module.with_changes(body=new_body).code
 
 class ToolCallVisitor(cst.CSTVisitor):
 
@@ -286,7 +365,7 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
             builder_assign_idx = i
         
         # Match builder.add_node(...)
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node")))])):
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
             last_add_node_idx = i
 
     if builder_assign_idx != -1:

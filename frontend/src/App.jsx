@@ -44,60 +44,31 @@ function App() {
       if (node.data && node.data.lines && editorRef.current) {
         const [startLine, endLine] = node.data.lines;
         console.log(`Highlighting lines ${startLine} to ${endLine}`);
-
-        // Reveal the start line in the center of the editor
         editorRef.current.revealLineInCenter(startLine);
-
-        // Set selection to highlight the code range
         const model = editorRef.current.getModel();
         const maxColumn = model.getLineMaxColumn(endLine);
-
         editorRef.current.setSelection({
           startLineNumber: startLine,
           startColumn: 1,
           endLineNumber: endLine,
           endColumn: maxColumn,
         });
-
-        // Expand sidebar if it's collapsed
-        if (isEditorCollapsed) {
-          setIsEditorCollapsed(false);
-        }
+        if (isEditorCollapsed) setIsEditorCollapsed(false);
       } else if (node.data && node.data.functionName && editorRef.current) {
-        console.log("Lines missing, searching for functionName:", node.data.functionName);
         const model = editorRef.current.getModel();
         const matches = model.findMatches(`def ${node.data.functionName}`, true, false, true, null, true);
-        
         if (matches.length > 0) {
           const match = matches[0];
           editorRef.current.revealLineInCenter(match.range.startLineNumber);
           editorRef.current.setSelection(match.range);
           if (isEditorCollapsed) setIsEditorCollapsed(false);
         }
-      } else {
-        console.warn("No line data or function name found for node:", node.id);
       }
     },
     [isEditorCollapsed],
   );
 
-  const onDeleteNode = useCallback(
-    (id) => {
-      setNodes((nds) => nds.filter((node) => node.id !== id));
-      setEdges((eds) =>
-        eds.filter((edge) => edge.source !== id && edge.target !== id),
-      );
-    },
-    [setNodes, setEdges],
-  );
-
-  const onDeleteEdge = useCallback(
-    (id) => {
-      setEdges((eds) => eds.filter((edge) => edge.id !== id));
-    },
-    [setEdges],
-  );
-
+  // 1. Basic State Updaters (local only)
   const onRenameEdgeLabel = useCallback(
     (id, newLabel) => {
       setEdges((eds) =>
@@ -112,42 +83,41 @@ function App() {
     [setEdges],
   );
 
-  const processGraphState = useCallback(
-    (data, renameHandler) => {
-      // Inject handlers into nodes
+  const onDeleteNodeLocal = useCallback(
+    (id) => {
+      setNodes((nds) => nds.filter((node) => node.id !== id));
+      setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
+    },
+    [setNodes, setEdges]
+  );
+
+  // 2. The Core State Processor
+  // It takes all handlers as arguments to avoid circularity during definition
+  const processGraphStateInternal = useCallback(
+    (data, handlers) => {
       const nodesWithHandlers = data.nodes.map((node) => ({
         ...node,
         data: {
           ...node.data,
           type: node.type,
-          onDelete: onDeleteNode,
-          onRename: renameHandler,
+          onDelete: handlers.onDeleteNode,
+          onRename: handlers.onRenameNode,
         },
       }));
 
-      // Inject handlers and styling into edges
       const edgesWithHandlers = data.edges.map((edge) => {
         const isConditional = edge.id.includes("-cond") || !!edge.label;
         return {
           ...edge,
           type: "deletable",
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 20,
-            height: 20,
-            color: "#b1b1b7",
-          },
-          style: {
-            strokeWidth: 2,
-            stroke: "#b1b1b7",
-            ...edge.style,
-          },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: "#b1b1b7" },
+          style: { strokeWidth: 2, stroke: "#b1b1b7", ...edge.style },
           data: {
             ...edge.data,
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
-            onDelete: onDeleteEdge,
-            onRenameLabel: onRenameEdgeLabel,
+            onDelete: handlers.onDeleteEdge,
+            onRenameLabel: handlers.onRenameEdgeLabel,
           },
         };
       });
@@ -155,69 +125,101 @@ function App() {
       setNodes(nodesWithHandlers);
       setEdges(edgesWithHandlers);
     },
-    [onDeleteNode, onDeleteEdge, onRenameEdgeLabel, setNodes, setEdges]
+    [setNodes, setEdges]
   );
 
+  // 3. Backend-Calling Handlers
+  // They will use a reference to themselves or a common process function
+  
   const onRenameNode = useCallback(
     async (id, newLabel) => {
-      console.log(`Renaming node ${id} to ${newLabel}`);
       try {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "rename",
-            node_id: id,
-            new_id: newLabel,
-          }),
+          body: JSON.stringify({ action: "rename", node_id: id, new_id: newLabel }),
         });
-
         if (response.ok) {
           const data = await response.json();
           if (data.code !== undefined) setCode(data.code);
-          processGraphState(data, onRenameNode);
-        } else {
-          const error = await response.json();
-          console.error("Rename failed:", error.detail);
+          // Re-inject the same handlers
+          processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
         }
-      } catch (error) {
-        console.error("Error renaming node:", error);
-      }
+      } catch (error) { console.error("Rename failed:", error); }
     },
-    [processGraphState, setCode]
+    [processGraphStateInternal, onDeleteNodeLocal, onRenameEdgeLabel] // Note: onDeleteEdge is used here, so it must be defined
   );
 
-  const processGraphData = useCallback(
-    (data) => {
-      processGraphState(data, onRenameNode);
-      if (data.code !== undefined) {
-        setCode(data.code);
-      }
+  const onDeleteEdge = useCallback(
+    async (id) => {
+      setEdges((eds) => {
+        const edge = eds.find(e => e.id === id);
+        if (edge) {
+          fetch("http://localhost:8000/api/graph/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "delete_edge", source: edge.source, target: edge.target }),
+          }).then(res => res.json()).then(data => {
+            if (data.code !== undefined) setCode(data.code);
+            processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
+          });
+        }
+        return eds.filter(e => e.id !== id);
+      });
     },
-    [processGraphState, onRenameNode, setCode],
+    [processGraphStateInternal, onRenameNode, onDeleteNodeLocal, onRenameEdgeLabel]
   );
 
-  useEffect(() => {
-    const fetchGraph = async () => {
+  const onConnect = useCallback(
+    async (params) => {
       try {
-        const response = await fetch("http://localhost:8000/api/graph");
-        const data = await response.json();
-        processGraphData(data);
-      } catch (error) {
-        console.error("Error fetching graph data:", error);
-      }
-    };
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "add_edge", source: params.source, target: params.target }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
+        }
+      } catch (error) { console.error("Connect failed:", error); }
+    },
+    [processGraphStateInternal, onRenameNode, onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel]
+  );
 
-    fetchGraph();
-  }, [processGraphData]);
+  const addNode = useCallback(async () => {
+    const nodeName = window.prompt("Enter a name for the new node:", "my_agent");
+    if (!nodeName) return;
+    const validName = nodeName.trim().replace(/\s+/g, "_");
+    try {
+      const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_node", new_id: validName }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.code !== undefined) setCode(data.code);
+        processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
+      }
+    } catch (error) { console.error("Add node failed:", error); }
+  }, [processGraphStateInternal, onRenameNode, onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel]);
+
+  // Initial load
+  useEffect(() => {
+    fetch("http://localhost:8000/api/graph")
+      .then(res => res.json())
+      .then(data => {
+        if (data.code !== undefined) setCode(data.code);
+        processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
+      });
+  }, [processGraphStateInternal, onRenameNode, onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel]);
 
   const syncTimerRef = useRef(null);
   const handleEditorChange = (value) => {
     setCode(value);
-
-    // Debounce sync to backend
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    
     syncTimerRef.current = setTimeout(async () => {
       try {
         const response = await fetch("http://localhost:8000/api/graph/sync", {
@@ -225,111 +227,13 @@ function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code: value }),
         });
-
         if (response.ok) {
           const data = await response.json();
-          processGraphState(data, onRenameNode); // Only update nodes/edges, keep code state
+          processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
         }
-      } catch (error) {
-        console.error("Sync failed:", error);
-      }
+      } catch (error) { console.error("Sync failed:", error); }
     }, 800);
   };
-
-  const onUploadClick = () => {
-    document.getElementById("code-upload-input").click();
-  };
-
-  const onFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await fetch("http://localhost:8000/api/graph/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        alert(`Upload failed: ${errorData.detail}`);
-        return;
-      }
-
-      const data = await response.json();
-      processGraphData(data);
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      alert("Error uploading file");
-    }
-
-    event.target.value = "";
-  };
-
-  const onConnect = useCallback(
-    (params) => {
-      const newEdge = {
-        ...params,
-        type: "deletable",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 20,
-          height: 20,
-          color: "#b1b1b7",
-        },
-        style: {
-          strokeWidth: 2,
-          stroke: "#b1b1b7",
-        },
-        data: {
-          isConditional: false,
-          label: "",
-          onDelete: onDeleteEdge,
-          onRenameLabel: onRenameEdgeLabel,
-        },
-      };
-      setEdges((eds) => addEdge(newEdge, eds));
-    },
-    [setEdges, onDeleteEdge, onRenameEdgeLabel],
-  );
-
-  const addNode = useCallback(async () => {
-    const nodeName = window.prompt("Enter a name for the new node:", "my_agent");
-    
-    if (!nodeName) return; // User cancelled
-
-    // Basic validation for Python function names (simplified)
-    const validName = nodeName.trim().replace(/\s+/g, "_");
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(validName)) {
-      alert("Invalid node name. Please use only letters, numbers, and underscores, starting with a letter or underscore.");
-      return;
-    }
-
-    try {
-      const response = await fetch("http://localhost:8000/api/graph/mutate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "add_node",
-          new_id: validName, // Use new_id field to pass the requested name
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        processGraphData(data);
-      } else {
-        const error = await response.json();
-        alert(`Add node failed: ${error.detail}`);
-        console.error("Add node failed:", error.detail);
-      }
-    } catch (error) {
-      console.error("Error adding node:", error);
-    }
-  }, [processGraphData]);
 
   return (
     <div className="main-container">
@@ -338,44 +242,37 @@ function App() {
           <div className="empty-state-container">
             <h2>No Graph Detected</h2>
             <p>Please upload your LangGraph code to get started.</p>
-            <button className="empty-state-upload-btn" onClick={onUploadClick}>
+            <button className="empty-state-upload-btn" onClick={() => document.getElementById("code-upload-input").click()}>
               📁 Upload LangGraph Code
             </button>
           </div>
         )}
         <div className="controls-container">
-          <button className="add-node-btn" onClick={addNode}>
-            + Add Node
-          </button>
-          <button className="upload-btn" onClick={onUploadClick}>
-            📁 Upload Code
-          </button>
-          <input
-            type="file"
-            id="code-upload-input"
-            style={{ display: "none" }}
-            accept=".py"
-            onChange={onFileChange}
-          />
+          <button className="add-node-btn" onClick={addNode}>+ Add Node</button>
+          <button className="upload-btn" onClick={() => document.getElementById("code-upload-input").click()}>📁 Upload Code</button>
+          <input type="file" id="code-upload-input" style={{ display: "none" }} accept=".py" onChange={async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append("file", file);
+            const res = await fetch("http://localhost:8000/api/graph/upload", { method: "POST", body: formData });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.code !== undefined) setCode(data.code);
+              processGraphStateInternal(data, { onRenameNode, onDeleteNode: onDeleteNodeLocal, onDeleteEdge, onRenameEdgeLabel });
+            }
+          }} />
         </div>
 
-        <button
-          className="toggle-editor-btn"
-          onClick={() => setIsEditorCollapsed(!isEditorCollapsed)}
-        >
+        <button className="toggle-editor-btn" onClick={() => setIsEditorCollapsed(!isEditorCollapsed)}>
           {isEditorCollapsed ? "← Show Code" : "Hide Code →"}
         </button>
 
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeClick={onNodeClick}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
+          nodes={nodes} edges={edges}
+          onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+          onConnect={onConnect} onNodeClick={onNodeClick}
+          nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView
         >
           <Controls />
           <MiniMap />
@@ -384,26 +281,12 @@ function App() {
       </div>
 
       <div className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}>
-        <div className="editor-header">
-          <span>Source Code</span>
-        </div>
+        <div className="editor-header"><span>Source Code</span></div>
         <div className="monaco-editor-wrapper">
           <Editor
-            height="100%"
-            language="python"
-            // defaultLanguage="python"
-            theme="vs-dark"
-            value={code}
-            onMount={handleEditorDidMount}
-            onChange={handleEditorChange}
-            options={{
-              readOnly: false,
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-            }}
+            height="100%" language="python" theme="vs-dark" value={code}
+            onMount={handleEditorDidMount} onChange={handleEditorChange}
+            options={{ readOnly: false, minimap: { enabled: false }, fontSize: 14, lineNumbers: "on", scrollBeyondLastLine: false, automaticLayout: true }}
           />
         </div>
       </div>
