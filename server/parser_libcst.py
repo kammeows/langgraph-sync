@@ -163,6 +163,56 @@ class ToolCallVisitor(cst.CSTVisitor):
                 node.func.value
             )
 
+class RenameNodeTransformer(cst.CSTTransformer):
+    def __init__(self, old_id: str, new_id: str):
+        self.old_id = old_id
+        self.new_id = new_id
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call):
+        # Handle builder.add_node("old_id", ...)
+        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))):
+            if len(updated_node.args) >= 1:
+                arg0 = updated_node.args[0].value
+                if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.old_id:
+                    new_arg = updated_node.args[0].with_changes(
+                        value=cst.SimpleString(f'"{self.new_id}"')
+                    )
+                    new_args = list(updated_node.args)
+                    new_args[0] = new_arg
+                    return updated_node.with_changes(args=new_args)
+
+        # Handle builder.add_edge("old_id", ...) or builder.add_edge(..., "old_id")
+        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))):
+            new_args = list(updated_node.args)
+            changed = False
+            for i in range(min(2, len(new_args))):
+                arg = new_args[i].value
+                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
+                    new_args[i] = new_args[i].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                    changed = True
+            if changed:
+                return updated_node.with_changes(args=new_args)
+
+        # Handle builder.add_conditional_edges("old_id", ...)
+        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))):
+            new_args = list(updated_node.args)
+            changed = False
+            if len(new_args) >= 1:
+                arg = new_args[0].value
+                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
+                    new_args[0] = new_args[0].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                    changed = True
+            if changed:
+                return updated_node.with_changes(args=new_args)
+
+        return updated_node
+
+    def leave_DictElement(self, original_node: cst.DictElement, updated_node: cst.DictElement):
+        # Handle target node in mapping dict: {"condition": "old_id"}
+        if isinstance(updated_node.value, cst.SimpleString) and updated_node.value.evaluated_value == self.old_id:
+            return updated_node.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+        return updated_node
+
 if __name__ == "__main__":
     import os
     

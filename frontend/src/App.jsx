@@ -91,20 +91,6 @@ function App() {
     [setNodes, setEdges],
   );
 
-  const onRenameNode = useCallback(
-    (id, newLabel) => {
-      setNodes((nds) =>
-        nds.map((node) => {
-          if (node.id === id) {
-            return { ...node, data: { ...node.data, label: newLabel } };
-          }
-          return node;
-        }),
-      );
-    },
-    [setNodes],
-  );
-
   const onDeleteEdge = useCallback(
     (id) => {
       setEdges((eds) => eds.filter((edge) => edge.id !== id));
@@ -126,10 +112,8 @@ function App() {
     [setEdges],
   );
 
-  const processGraphData = useCallback(
-    (data) => {
-      console.log("Received graph data:", data);
-
+  const processGraphState = useCallback(
+    (data, renameHandler) => {
       // Inject handlers into nodes
       const nodesWithHandlers = data.nodes.map((node) => ({
         ...node,
@@ -137,7 +121,7 @@ function App() {
           ...node.data,
           type: node.type,
           onDelete: onDeleteNode,
-          onRename: onRenameNode,
+          onRename: renameHandler,
         },
       }));
 
@@ -170,22 +154,47 @@ function App() {
 
       setNodes(nodesWithHandlers);
       setEdges(edgesWithHandlers);
+    },
+    [onDeleteNode, onDeleteEdge, onRenameEdgeLabel, setNodes, setEdges]
+  );
 
+  const onRenameNode = useCallback(
+    async (id, newLabel) => {
+      console.log(`Renaming node ${id} to ${newLabel}`);
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "rename",
+            node_id: id,
+            new_id: newLabel,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphState(data, onRenameNode);
+        } else {
+          const error = await response.json();
+          console.error("Rename failed:", error.detail);
+        }
+      } catch (error) {
+        console.error("Error renaming node:", error);
+      }
+    },
+    [processGraphState, setCode]
+  );
+
+  const processGraphData = useCallback(
+    (data) => {
+      processGraphState(data, onRenameNode);
       if (data.code !== undefined) {
-        console.log("Setting code state, length:", data.code.length);
-        console.log(JSON.stringify(data.code));
         setCode(data.code);
       }
     },
-    [
-      onDeleteNode,
-      onRenameNode,
-      onDeleteEdge,
-      onRenameEdgeLabel,
-      setNodes,
-      setEdges,
-      setCode,
-    ],
+    [processGraphState, onRenameNode, setCode],
   );
 
   useEffect(() => {
@@ -201,6 +210,31 @@ function App() {
 
     fetchGraph();
   }, [processGraphData]);
+
+  const syncTimerRef = useRef(null);
+  const handleEditorChange = (value) => {
+    setCode(value);
+
+    // Debounce sync to backend
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    
+    syncTimerRef.current = setTimeout(async () => {
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: value }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          processGraphState(data, onRenameNode); // Only update nodes/edges, keep code state
+        }
+      } catch (error) {
+        console.error("Sync failed:", error);
+      }
+    }, 800);
+  };
 
   const onUploadClick = () => {
     document.getElementById("code-upload-input").click();
@@ -342,8 +376,9 @@ function App() {
             theme="vs-dark"
             value={code}
             onMount={handleEditorDidMount}
+            onChange={handleEditorChange}
             options={{
-              readOnly: true,
+              readOnly: false,
               minimap: { enabled: false },
               fontSize: 14,
               lineNumbers: "on",

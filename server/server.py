@@ -7,7 +7,7 @@ from typing import Optional
 import traceback
 
 # Import our parser and transformer
-from parser_libcst import LangGraphAnalyzer, ToolCallVisitor
+from parser_libcst import LangGraphAnalyzer, ToolCallVisitor, RenameNodeTransformer
 from transform import transform_to_react_flow
 
 app = FastAPI()
@@ -27,7 +27,11 @@ class MutationRequest(BaseModel):
     source: Optional[str] = None
     target: Optional[str] = None
     node_id: Optional[str] = None
+    new_id: Optional[str] = None # Added for rename
     payload: Optional[dict] = None
+
+class SyncRequest(BaseModel):
+    code: str
 
 def parse_code_to_graph(source_code: str):
     try:
@@ -47,6 +51,17 @@ def parse_code_to_graph(source_code: str):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=422, detail=f"Failed to parse code: {str(e)}")
+
+@app.post("/api/graph/sync")
+async def sync_graph(request: SyncRequest):
+    """Sync graph from provided code without saving to file."""
+    try:
+        return parse_code_to_graph(request.code)
+    except Exception as e:
+        # If code has syntax errors, we might want to return 422 or similar
+        # but for robustness, we could just return the last known good state 
+        # (handled by frontend usually, or we can catch here)
+        raise HTTPException(status_code=422, detail=f"Sync failed: {str(e)}")
 
 @app.get("/api/graph")
 async def get_graph():
@@ -77,7 +92,24 @@ async def upload_code(file: UploadFile = File(...)):
 @app.post("/api/graph/mutate")
 async def mutate_graph(request: MutationRequest):
     print(f"Mutation received: {request.action}")
-    print(f"Payload: {request.model_dump()}")
+    
+    if request.action == "rename":
+        try:
+            with open(AGENT_FILE, "r", encoding="utf8") as f:
+                source_code = f.read()
+            
+            module = cst.parse_module(source_code)
+            transformer = RenameNodeTransformer(request.node_id, request.new_id)
+            new_module = module.visit(transformer)
+            
+            with open(AGENT_FILE, "w", encoding="utf8") as f:
+                f.write(new_module.code)
+                
+            return parse_code_to_graph(new_module.code)
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Rename failed: {str(e)}")
+
     return {"status": "success", "received": request.action}
 
 if __name__ == "__main__":

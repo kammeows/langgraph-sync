@@ -1,14 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Handle, Position } from '@xyflow/react';
 
 const EditableNode = ({ data, id, selected }) => {
   const [label, setLabel] = useState(data.label || id);
   const [isEditing, setIsEditing] = useState(false);
 
+  // Keep local label in sync with external updates (e.g. from code sync)
+  useEffect(() => {
+    if (!isEditing) {
+      setLabel(data.label || id);
+    }
+  }, [data.label, id, isEditing]);
+
   const onLabelChange = (evt) => {
     setLabel(evt.target.value);
-    if (data.onRename) {
-      data.onRename(id, evt.target.value);
+  };
+
+  const commitRename = () => {
+    setIsEditing(false);
+    // Only trigger rename if the label actually changed
+    if (data.onRename && label !== data.label) {
+      data.onRename(id, label);
     }
   };
 
@@ -29,9 +41,9 @@ const EditableNode = ({ data, id, selected }) => {
             type="text"
             value={label}
             onChange={onLabelChange}
-            onBlur={() => setIsEditing(false)}
+            onBlur={commitRename}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') setIsEditing(false);
+              if (e.key === 'Enter') commitRename();
             }}
             autoFocus
           />
