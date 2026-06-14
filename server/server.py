@@ -115,24 +115,31 @@ async def mutate_graph(request: MutationRequest):
             with open(AGENT_FILE, "r", encoding="utf8") as f:
                 source_code = f.read()
             
-            # Find a unique name like node1, node2...
-            # We can parse it quickly to find existing ones
+            # Find a unique name
             module = cst.parse_module(source_code)
             analyzer = LangGraphAnalyzer()
             cst.metadata.MetadataWrapper(module).visit(analyzer)
-            
             existing_nodes = set(analyzer.nodes.keys())
-            index = 1
-            while f"node{index}" in existing_nodes:
-                index += 1
+            existing_functions = set(analyzer.functions)
+
+            if request.new_id:
+                if request.new_id in existing_nodes or request.new_id in existing_functions:
+                    raise HTTPException(status_code=400, detail=f"Name '{request.new_id}' already exists as a node or function.")
+                new_node_id = request.new_id
+            else:
+                index = 1
+                while f"node{index}" in existing_nodes:
+                    index += 1
+                new_node_id = f"node{index}"
             
-            new_node_id = f"node{index}"
             updated_code = add_node_to_code(source_code, new_node_id)
             
             with open(AGENT_FILE, "w", encoding="utf8") as f:
                 f.write(updated_code)
                 
             return parse_code_to_graph(updated_code)
+        except HTTPException:
+            raise
         except Exception as e:
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Add node failed: {str(e)}")

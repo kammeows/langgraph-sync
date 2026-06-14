@@ -297,12 +297,24 @@ function App() {
   );
 
   const addNode = useCallback(async () => {
+    const nodeName = window.prompt("Enter a name for the new node:", "my_agent");
+    
+    if (!nodeName) return; // User cancelled
+
+    // Basic validation for Python function names (simplified)
+    const validName = nodeName.trim().replace(/\s+/g, "_");
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(validName)) {
+      alert("Invalid node name. Please use only letters, numbers, and underscores, starting with a letter or underscore.");
+      return;
+    }
+
     try {
       const response = await fetch("http://localhost:8000/api/graph/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "add_node",
+          new_id: validName, // Use new_id field to pass the requested name
         }),
       });
 
@@ -311,6 +323,7 @@ function App() {
         processGraphData(data);
       } else {
         const error = await response.json();
+        alert(`Add node failed: ${error.detail}`);
         console.error("Add node failed:", error.detail);
       }
     } catch (error) {
