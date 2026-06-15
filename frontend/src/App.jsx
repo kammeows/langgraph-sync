@@ -13,6 +13,7 @@ import Editor from "@monaco-editor/react";
 
 import EditableNode from "./components/EditableNode";
 import DeletableEdge from "./components/DeletableEdge";
+import SelfLoopEdge from "./components/SelfLoopEdge";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
@@ -26,6 +27,7 @@ const nodeTypes = {
 
 const edgeTypes = {
   deletable: DeletableEdge,
+  selfLoop: SelfLoopEdge,
 };
 
 function App() {
@@ -118,28 +120,22 @@ function App() {
       const edgesWithHandlers = data.edges.map((edge) => {
         const isConditional = edge.id.includes("-cond") || !!edge.label;
         const isStartEdge = edge.source === "__start__";
-
+        const isSelfLoop = edge.source === edge.target;
+        
         return {
           ...edge,
-          type: "deletable",
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 20,
-            height: 20,
-            color: isStartEdge ? "#4caf50" : "#b1b1b7",
-          },
-          style: {
-            strokeWidth: isStartEdge ? 3 : 2,
-            stroke: isStartEdge ? "#4caf50" : "#b1b1b7",
-            ...edge.style,
-          },
-          deletable: true, // Allow deleting start edge to change entry point
+          type: isSelfLoop ? "selfLoop" : "deletable",
+          markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: isStartEdge ? "#4caf50" : "#b1b1b7" },
+          style: { strokeWidth: isStartEdge ? 3 : 2, stroke: isStartEdge ? "#4caf50" : "#b1b1b7", ...edge.style },
+          deletable: true,
           data: {
             ...edge.data,
+            source: edge.source,
+            target: edge.target,
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
             onDelete: (id) => {
-              handlers.onDeleteEdge && handlers.onDeleteEdge(id);
+               handlers.onDeleteEdge && handlers.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,
           },
