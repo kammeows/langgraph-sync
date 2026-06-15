@@ -6,15 +6,25 @@ def transform_to_react_flow(analyzer, tool_visitor):
     nodes = []
     edges = []
     
-    # 0. Add virtual START node
+    # 0. Add virtual sentinel nodes (always present)
     nodes.append({
         "id": "__start__",
-        "type": "startNode", # New custom type
+        "type": "startNode",
         "position": {"x": -100, "y": 100},
         "data": {
             "label": "START",
             "isEditable": False,
             "deletable": False
+        }
+    })
+    nodes.append({
+        "id": "__end__",
+        "type": "startNode",
+        "position": {"x": 800, "y": 100},
+        "data": {
+            "label": "END",
+            "isEditable": False,
+            "deletable": True
         }
     })
 
@@ -60,7 +70,6 @@ def transform_to_react_flow(analyzer, tool_visitor):
         })
 
     # 3. Process Sub-Tool Nodes
-    # (Existing subtool logic, but fixed to be outside the agent loop)
     sub_tool_y = 100
     processed_subtools = set()
 
@@ -95,30 +104,13 @@ def transform_to_react_flow(analyzer, tool_visitor):
 
     # 4. Process Standard Edges
     for src, dst in analyzer.edges:
-        # Handle END node visually
-        if dst == "__end__":
-             # Check if END node exists, if not add it once
-             end_node_id = "__end__"
-             if not any(n["id"] == end_node_id for n in nodes):
-                 nodes.append({
-                     "id": end_node_id,
-                     "type": "startNode", # Use same non-editable type
-                     "position": {"x": 400, "y": y_offset},
-                     "data": {"label": "END", "isEditable": False, "deletable": False}
-                 })
-             edges.append({
-                 "id": f"e-{src}-__end__",
-                 "source": src,
-                 "target": "__end__",
-                 "animated": True
-             })
-        else:
-             edges.append({
-                 "id": f"e-{src}-{dst}",
-                 "source": src,
-                 "target": dst,
-                 "animated": True
-             })
+        target_id = "__end__" if dst == "__end__" else dst
+        edges.append({
+            "id": f"e-{src}-{target_id}",
+            "source": src,
+            "target": target_id,
+            "animated": True
+        })
 
     # 5. Process Conditional Edges
     for cond in analyzer.conditional_edges:
@@ -126,21 +118,11 @@ def transform_to_react_flow(analyzer, tool_visitor):
         mapping = cond["mapping"]
         
         for label, target in mapping.items():
-            if target == "__end__":
-                end_node_id = "__end__"
-                if not any(n["id"] == end_node_id for n in nodes):
-                    nodes.append({
-                        "id": end_node_id,
-                        "type": "startNode",
-                        "position": {"x": 400, "y": y_offset},
-                        "data": {"label": "END", "isEditable": False, "deletable": False}
-                    })
-                target = "__end__"
-                
+            target_id = "__end__" if target == "__end__" else target
             edges.append({
-                "id": f"e-{source}-{target}-cond-{label}",
+                "id": f"e-{source}-{target_id}-cond-{label}",
                 "source": source,
-                "target": target,
+                "target": target_id,
                 "style": {"strokeDasharray": "5"},
                 "label": f"({label})"
             })

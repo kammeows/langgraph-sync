@@ -346,6 +346,21 @@ function App() {
             + Add Node
           </button>
           <button
+            className="add-node-btn"
+            style={{ backgroundColor: "#f87171" }}
+            onClick={() => {
+              // END is now always present by default, but this ensures a fresh fetch if needed
+              fetch("http://localhost:8000/api/graph")
+                .then((res) => res.json())
+                .then((data) => {
+                  if (data.code !== undefined) setCode(data.code);
+                  processGraphStateInternal(data);
+                });
+            }}
+          >
+            + END Node
+          </button>
+          <button
             className="upload-btn"
             onClick={() => document.getElementById("code-upload-input").click()}
           >
