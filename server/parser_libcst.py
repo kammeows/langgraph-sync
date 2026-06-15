@@ -12,6 +12,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
+        self.entry_point = None
 
     # ----------------------------------
     # Collect all function defs
@@ -84,7 +85,23 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
                 if src_val and dst_val:
                     self.edges.append((src_val, dst_val))
-        
+
+        # ----------------------------------
+        # builder.set_entry_point(...)
+        # ----------------------------------
+
+        if m.matches(
+            node.func,
+            m.Attribute(
+                value=m.Name("builder"),
+                attr=m.Name("set_entry_point")
+            )
+        ):
+            if len(node.args) >= 1:
+                arg0 = node.args[0].value
+                if isinstance(arg0, cst.SimpleString):
+                    self.entry_point = arg0.evaluated_value
+    
         # ----------------------------------
         # builder.add_conditional_edges(...)
         # ----------------------------------
@@ -135,6 +152,57 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         "mapping": mapping
                     }
                 )
+
+class SetEntryPointTransformer(cst.CSTTransformer):
+    def __init__(self, target_id: str):
+        self.target_id = target_id
+        self.found = False
+
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
+            self.found = True
+            call = updated_node.body[0].value
+            new_args = [cst.Arg(value=cst.SimpleString(f'"{self.target_id}"'))]
+            return updated_node.with_changes(
+                body=[cst.Expr(value=call.with_changes(args=new_args))]
+            )
+        return updated_node
+
+def update_entry_point_in_code(source_code: str, target_id: str) -> str:
+    module = cst.parse_module(source_code)
+    transformer = SetEntryPointTransformer(target_id)
+    new_module = module.visit(transformer)
+    
+    if transformer.found:
+        return new_module.code
+    
+    # If not found, add it
+    new_body = list(new_module.body)
+    entry_stmt = cst.SimpleStatementLine(
+        body=[
+            cst.Expr(
+                value=cst.Call(
+                    func=cst.Attribute(value=cst.Name("builder"), attr=cst.Name("set_entry_point")),
+                    args=[cst.Arg(value=cst.SimpleString(f'"{target_id}"'))]
+                )
+            )
+        ]
+    )
+    
+    # Place it after builder initialization or after last add_node
+    insert_idx = -1
+    for i, stmt in enumerate(new_body):
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
+            insert_idx = i
+        elif insert_idx == -1 and m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
+             insert_idx = i
+             
+    if insert_idx != -1:
+        new_body.insert(insert_idx + 1, entry_stmt)
+    else:
+        new_body.append(entry_stmt)
+        
+    return new_module.with_changes(body=new_body).code
 
 class RemoveEdgeTransformer(cst.CSTTransformer):
     def __init__(self, src: str, dst: str):

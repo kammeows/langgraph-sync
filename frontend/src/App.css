@@ -210,6 +210,13 @@ body {
   border-color: #f97316;
 }
 
+.editable-node-container.startNode {
+  background: #fdf2f2;
+  border-color: #f87171;
+  border-radius: 20px; /* More rounded */
+  padding: 5px 15px;
+}
+
 .edge-label-container {
   background: white;
   padding: 2px 8px;

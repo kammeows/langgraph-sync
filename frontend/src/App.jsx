@@ -21,6 +21,7 @@ const nodeTypes = {
   agentNode: EditableNode,
   toolNode: EditableNode,
   subToolNode: EditableNode,
+  startNode: EditableNode,
 };
 
 const edgeTypes = {
@@ -103,23 +104,44 @@ function App() {
         data: {
           ...node.data,
           type: node.type,
-          onDelete: (id) => handlers.onDeleteNode && handlers.onDeleteNode(id),
-          onRename: (id, label) => handlers.onRenameNode && handlers.onRenameNode(id, label),
+          onDelete: (id) => {
+            if (id === "__start__" || id === "__end__") return;
+            handlers.onDeleteNode && handlers.onDeleteNode(id);
+          },
+          onRename: (id, label) => {
+            if (id === "__start__" || id === "__end__") return;
+            handlers.onRenameNode && handlers.onRenameNode(id, label);
+          },
         },
       }));
 
       const edgesWithHandlers = data.edges.map((edge) => {
         const isConditional = edge.id.includes("-cond") || !!edge.label;
+        const isStartEdge = edge.source === "__start__";
+
         return {
           ...edge,
           type: "deletable",
-          markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: "#b1b1b7" },
-          style: { strokeWidth: 2, stroke: "#b1b1b7", ...edge.style },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 20,
+            height: 20,
+            color: isStartEdge ? "#4caf50" : "#b1b1b7",
+          },
+          style: {
+            strokeWidth: isStartEdge ? 3 : 2,
+            stroke: isStartEdge ? "#4caf50" : "#b1b1b7",
+            ...edge.style,
+          },
+          deletable: !isStartEdge, // LangGraph usually requires an entry point
           data: {
             ...edge.data,
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
-            onDelete: (id) => handlers.onDeleteEdge && handlers.onDeleteEdge(id),
+            onDelete: (id) => {
+              if (isStartEdge) return; // Prevent deleting start edge via UI if we want to enforce 1
+              handlers.onDeleteEdge && handlers.onDeleteEdge(id);
+            },
             onRenameLabel: onRenameEdgeLabel,
           },
         };
@@ -132,28 +154,35 @@ function App() {
   );
 
   // 4. Backend-Calling Handlers
-  
+
   const onRenameNode = useCallback(
     async (id, newLabel) => {
       try {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "rename", node_id: id, new_id: newLabel }),
+          body: JSON.stringify({
+            action: "rename",
+            node_id: id,
+            new_id: newLabel,
+          }),
         });
         if (response.ok) {
           const data = await response.json();
           if (data.code !== undefined) setCode(data.code);
           processGraphStateInternal(data);
         }
-      } catch (error) { console.error("Rename failed:", error); }
+      } catch (error) {
+        console.error("Rename failed:", error);
+      }
     },
-    [processGraphStateInternal, setCode]
+    [processGraphStateInternal, setCode],
   );
 
   const onDeleteNode = useCallback(
     async (id) => {
-      if (!window.confirm(`Are you sure you want to delete node "${id}"?`)) return;
+      if (!window.confirm(`Are you sure you want to delete node "${id}"?`))
+        return;
       try {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
@@ -165,9 +194,11 @@ function App() {
           if (data.code !== undefined) setCode(data.code);
           processGraphStateInternal(data);
         }
-      } catch (error) { console.error("Delete node failed:", error); }
+      } catch (error) {
+        console.error("Delete node failed:", error);
+      }
     },
-    [processGraphStateInternal, setCode]
+    [processGraphStateInternal, setCode],
   );
 
   const onDeleteEdge = useCallback(
@@ -199,24 +230,42 @@ function App() {
 
   const onConnect = useCallback(
     async (params) => {
+      if (params.target === "__start__") {
+        alert("The START node cannot have incoming edges.");
+        return;
+      }
+      if (params.source === "__end__") {
+        alert("The END node cannot have outgoing edges.");
+        return;
+      }
+
       try {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "add_edge", source: params.source, target: params.target }),
+          body: JSON.stringify({
+            action: "add_edge",
+            source: params.source,
+            target: params.target,
+          }),
         });
         if (response.ok) {
           const data = await response.json();
           if (data.code !== undefined) setCode(data.code);
           processGraphStateInternal(data);
         }
-      } catch (error) { console.error("Connect failed:", error); }
+      } catch (error) {
+        console.error("Connect failed:", error);
+      }
     },
-    [processGraphStateInternal, setCode]
+    [processGraphStateInternal, setCode],
   );
 
   const addNode = useCallback(async () => {
-    const nodeName = window.prompt("Enter a name for the new node:", "my_agent");
+    const nodeName = window.prompt(
+      "Enter a name for the new node:",
+      "my_agent",
+    );
     if (!nodeName) return;
     const validName = nodeName.trim().replace(/\s+/g, "_");
     try {
@@ -230,19 +279,26 @@ function App() {
         if (data.code !== undefined) setCode(data.code);
         processGraphStateInternal(data);
       }
-    } catch (error) { console.error("Add node failed:", error); }
+    } catch (error) {
+      console.error("Add node failed:", error);
+    }
   }, [processGraphStateInternal, setCode]);
 
   // Keep the handlers ref updated
   useEffect(() => {
-    handlersRef.current = { onRenameNode, onDeleteNode, onDeleteEdge, onRenameEdgeLabel };
+    handlersRef.current = {
+      onRenameNode,
+      onDeleteNode,
+      onDeleteEdge,
+      onRenameEdgeLabel,
+    };
   }, [onRenameNode, onDeleteNode, onDeleteEdge, onRenameEdgeLabel]);
 
   // Initial load
   useEffect(() => {
     fetch("http://localhost:8000/api/graph")
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         if (data.code !== undefined) setCode(data.code);
         processGraphStateInternal(data);
       });
@@ -263,7 +319,9 @@ function App() {
           const data = await response.json();
           processGraphStateInternal(data);
         }
-      } catch (error) { console.error("Sync failed:", error); }
+      } catch (error) {
+        console.error("Sync failed:", error);
+      }
     }, 800);
   };
 

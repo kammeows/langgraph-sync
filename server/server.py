@@ -14,7 +14,8 @@ from parser_libcst import (
     RemoveEdgeTransformer,
     RemoveNodeTransformer,
     add_node_to_code,
-    add_edge_to_code
+    add_edge_to_code,
+    update_entry_point_in_code # Added
 )
 from transform import transform_to_react_flow
 
@@ -139,15 +140,18 @@ async def mutate_graph(request: MutationRequest):
             updated_code = new_module.code
 
         elif request.action == "add_edge":
-            # Check for duplication first
-            module = cst.parse_module(source_code)
-            analyzer = LangGraphAnalyzer()
-            cst.metadata.MetadataWrapper(module).visit(analyzer)
-            
-            if (request.source, request.target) in analyzer.edges:
-                return parse_code_to_graph(source_code)
-            
-            updated_code = add_edge_to_code(source_code, request.source, request.target)
+            if request.source == "__start__":
+                updated_code = update_entry_point_in_code(source_code, request.target)
+            else:
+                # Check for duplication first
+                module = cst.parse_module(source_code)
+                analyzer = LangGraphAnalyzer()
+                cst.metadata.MetadataWrapper(module).visit(analyzer)
+                
+                if (request.source, request.target) in analyzer.edges:
+                    return parse_code_to_graph(source_code)
+                
+                updated_code = add_edge_to_code(source_code, request.source, request.target)
 
         elif request.action == "delete_edge":
             module = cst.parse_module(source_code)

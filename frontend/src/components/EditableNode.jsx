@@ -30,9 +30,12 @@ const EditableNode = ({ data, id, selected }) => {
     }
   };
 
+  const isStart = id === '__start__';
+  const isEnd = id === '__end__';
+
   return (
     <div className={`editable-node-container ${data.type || ''} ${selected ? 'selected' : ''}`}>
-      <Handle type="target" position={Position.Top} />
+      {!isStart && <Handle type="target" position={Position.Top} />}
       
       <div className="editable-node-body">
         {isEditing ? (
@@ -60,12 +63,14 @@ const EditableNode = ({ data, id, selected }) => {
           </div>
         )}
         
-        <button className="delete-node-btn nodrag" onClick={onDelete}>
-          &times;
-        </button>
+        {data.deletable !== false && (
+          <button className="delete-node-btn nodrag" onClick={onDelete}>
+            &times;
+          </button>
+        )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} />
+      {!isEnd && <Handle type="source" position={Position.Bottom} />}
     </div>
   );
 };
