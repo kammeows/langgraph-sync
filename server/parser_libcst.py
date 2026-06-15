@@ -161,6 +161,52 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                     return cst.RemoveFromParent()
         return updated_node
 
+class RemoveNodeTransformer(cst.CSTTransformer):
+    def __init__(self, node_id: str):
+        self.node_id = node_id
+
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        # 1. builder.add_node("node_id", ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
+            call = updated_node.body[0].value
+            if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
+                if call.args[0].value.evaluated_value == self.node_id:
+                    return cst.RemoveFromParent()
+
+        # 2. builder.add_edge("node_id", ...) or builder.add_edge(..., "node_id")
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+            call = updated_node.body[0].value
+            if len(call.args) >= 2:
+                arg0 = call.args[0].value
+                arg1 = call.args[1].value
+                match_src = isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.node_id
+                match_dst = (isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.node_id) or \
+                            (isinstance(arg1, cst.Name) and arg1.value == "END" and self.node_id == "__end__")
+                if match_src or match_dst:
+                    return cst.RemoveFromParent()
+
+        # 3. builder.add_conditional_edges("node_id", ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
+            call = updated_node.body[0].value
+            if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
+                if call.args[0].value.evaluated_value == self.node_id:
+                    return cst.RemoveFromParent()
+
+        # 4. builder.set_entry_point("node_id")
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
+            call = updated_node.body[0].value
+            if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
+                if call.args[0].value.evaluated_value == self.node_id:
+                    return cst.RemoveFromParent()
+
+        return updated_node
+
+    def leave_DictElement(self, original_node: cst.DictElement, updated_node: cst.DictElement):
+        # Remove entry from mapping if it's a target
+        if isinstance(updated_node.value, cst.SimpleString) and updated_node.value.evaluated_value == self.node_id:
+            return cst.RemoveFromParent()
+        return updated_node
+
 def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
     module = cst.parse_module(source_code)
     

@@ -250,9 +250,9 @@ builder.add_conditional_edges(
         "tool": "tool",
     },
 )
+builder.add_edge("research", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
 builder.add_edge("report", END)
-builder.add_edge("research", "tool")
 
 graph = builder.compile()

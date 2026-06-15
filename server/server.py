@@ -12,6 +12,7 @@ from parser_libcst import (
     ToolCallVisitor, 
     RenameNodeTransformer, 
     RemoveEdgeTransformer,
+    RemoveNodeTransformer,
     add_node_to_code,
     add_edge_to_code
 )
@@ -130,6 +131,12 @@ async def mutate_graph(request: MutationRequest):
                 new_node_id = f"node{index}"
             
             updated_code = add_node_to_code(source_code, new_node_id)
+        
+        elif request.action == "delete_node":
+            module = cst.parse_module(source_code)
+            transformer = RemoveNodeTransformer(request.node_id)
+            new_module = module.visit(transformer)
+            updated_code = new_module.code
 
         elif request.action == "add_edge":
             # Check for duplication first
