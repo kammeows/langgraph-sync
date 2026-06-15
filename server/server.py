@@ -13,9 +13,10 @@ from parser_libcst import (
     RenameNodeTransformer, 
     RemoveEdgeTransformer,
     RemoveNodeTransformer,
+    RemoveEntryPointTransformer, # Added
     add_node_to_code,
     add_edge_to_code,
-    update_entry_point_in_code # Added
+    update_entry_point_in_code
 )
 from transform import transform_to_react_flow
 
@@ -155,7 +156,10 @@ async def mutate_graph(request: MutationRequest):
 
         elif request.action == "delete_edge":
             module = cst.parse_module(source_code)
-            transformer = RemoveEdgeTransformer(request.source, request.target)
+            if request.source == "__start__":
+                transformer = RemoveEntryPointTransformer()
+            else:
+                transformer = RemoveEdgeTransformer(request.source, request.target)
             new_module = module.visit(transformer)
             updated_code = new_module.code
 

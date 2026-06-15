@@ -133,13 +133,12 @@ function App() {
             stroke: isStartEdge ? "#4caf50" : "#b1b1b7",
             ...edge.style,
           },
-          deletable: !isStartEdge, // LangGraph usually requires an entry point
+          deletable: true, // Allow deleting start edge to change entry point
           data: {
             ...edge.data,
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
             onDelete: (id) => {
-              if (isStartEdge) return; // Prevent deleting start edge via UI if we want to enforce 1
               handlers.onDeleteEdge && handlers.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,

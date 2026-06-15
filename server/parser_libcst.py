@@ -275,6 +275,12 @@ class RemoveNodeTransformer(cst.CSTTransformer):
             return cst.RemoveFromParent()
         return updated_node
 
+class RemoveEntryPointTransformer(cst.CSTTransformer):
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
+            return cst.RemoveFromParent()
+        return updated_node
+
 def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
     module = cst.parse_module(source_code)
     
