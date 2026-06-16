@@ -139,6 +139,20 @@ function App() {
     [setEdges],
   );
 
+  const onUpdateEdgeData = useCallback(
+    (id, newData) => {
+      setEdges((eds) =>
+        eds.map((edge) => {
+          if (edge.id === id) {
+            return { ...edge, data: { ...edge.data, ...newData } };
+          }
+          return edge;
+        }),
+      );
+    },
+    [setEdges],
+  );
+
   // 3. The Core State Processor
   // Uses handlersRef.current for injection to avoid dependency cycles
   const processGraphStateInternal = useCallback(
@@ -182,6 +196,7 @@ function App() {
           deletable: true,
           data: {
             ...edge.data,
+            id: edge.id, // Pass ID for updates
             source: edge.source,
             target: edge.target,
             isConditional,
@@ -190,6 +205,7 @@ function App() {
               handlers.onDeleteEdge && handlers.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,
+            onUpdateData: onUpdateEdgeData,
           },
         };
       });
