@@ -205,11 +205,13 @@ def update_entry_point_in_code(source_code: str, target_id: str) -> str:
     return new_module.with_changes(body=new_body).code
 
 class RemoveEdgeTransformer(cst.CSTTransformer):
-    def __init__(self, src: str, dst: str):
+    def __init__(self, src: str, dst: str, condition: str = None):
         self.src = src
         self.dst = dst
+        self.condition = condition
 
     def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        # 1. Handle builder.add_edge(...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
             expr = updated_node.body[0]
             call = expr.value
@@ -227,6 +229,53 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                 
                 if match_src and match_dst:
                     return cst.RemoveFromParent()
+
+        # 2. Handle builder.add_conditional_edges(...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
+            expr = updated_node.body[0]
+            call = expr.value
+            if len(call.args) >= 3:
+                # Arg 0: Source node ID
+                arg0 = call.args[0].value
+                if not (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src):
+                    return updated_node
+                
+                # Arg 2: Mapping dictionary {"label": "target"}
+                arg2 = call.args[2].value
+                if isinstance(arg2, cst.Dict):
+                    new_elements = []
+                    for el in arg2.elements:
+                        if isinstance(el, cst.DictElement):
+                            # Usually keys are condition strings, values are target node strings
+                            # We want to remove the entry where key == condition OR value == dst
+                            # (If condition is provided, use that for precision)
+                            key_match = False
+                            if self.condition and isinstance(el.key, cst.SimpleString) and el.key.evaluated_value == self.condition:
+                                key_match = True
+                            
+                            val_match = False
+                            if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.dst:
+                                val_match = True
+                            elif isinstance(el.value, cst.Name) and el.value.value == "END" and self.dst == "__end__":
+                                val_match = True
+                                
+                            if key_match or (not self.condition and val_match):
+                                # Skip this element (delete it)
+                                continue
+                        new_elements.append(el)
+                    
+                    if not new_elements:
+                        # Dictionary is now empty, remove the whole add_conditional_edges call
+                        return cst.RemoveFromParent()
+                    
+                    # Update the call with the new dictionary
+                    new_dict = arg2.with_changes(elements=new_elements)
+                    new_args = list(call.args)
+                    new_args[2] = call.args[2].with_changes(value=new_dict)
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
+
         return updated_node
 
 class RemoveNodeTransformer(cst.CSTTransformer):

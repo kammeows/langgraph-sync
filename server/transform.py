@@ -133,7 +133,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "source": source,
                 "target": target_id,
                 "style": {"strokeDasharray": "5"},
-                "label": f"({label})"
+                "label": f"({label})",
+                "data": {"condition": label}
             })
 
     return {"nodes": nodes, "edges": edges}
