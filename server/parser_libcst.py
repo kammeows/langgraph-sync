@@ -553,6 +553,119 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
         
     return module.with_changes(body=new_body).code
 
+def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:
+    module = cst.parse_module(source_code)
+    
+    # 1. Create mapping dictionary
+    dict_elements = []
+    for key, val in mapping.items():
+        val_node = cst.Name("END") if val == "__end__" else cst.SimpleString(f'"{val}"')
+        dict_elements.append(
+            cst.DictElement(
+                key=cst.SimpleString(f'"{key}"'),
+                value=val_node
+            )
+        )
+    
+    mapping_dict = cst.Dict(elements=dict_elements)
+    
+    # 2. Create builder.add_conditional_edges call
+    cond_stmt = cst.SimpleStatementLine(
+        body=[
+            cst.Expr(
+                value=cst.Call(
+                    func=cst.Attribute(
+                        value=cst.Name("builder"),
+                        attr=cst.Name("add_conditional_edges")
+                    ),
+                    args=[
+                        cst.Arg(cst.SimpleString(f'"{source}"')),
+                        cst.Arg(cst.Name(router_fn)),
+                        cst.Arg(mapping_dict)
+                    ]
+                )
+            )
+        ]
+    )
+
+    new_body = list(module.body)
+    
+    # 3. Check if router_fn exists, if not add a skeleton
+    analyzer = LangGraphAnalyzer()
+    wrapper = cst.metadata.MetadataWrapper(module)
+    wrapper.visit(analyzer)
+    
+    if router_fn not in analyzer.functions:
+        # Create skeleton:
+        # def router_fn(state: AgentState):
+        #     return "key"
+        first_key = list(mapping.keys())[0] if mapping else "next"
+        router_def = cst.FunctionDef(
+            name=cst.Name(router_fn),
+            params=cst.Parameters(
+                params=[
+                    cst.Param(
+                        name=cst.Name("state"),
+                        annotation=cst.Annotation(annotation=cst.Name("AgentState"))
+                    )
+                ]
+            ),
+            body=cst.IndentedBlock(
+                body=[
+                    cst.SimpleStatementLine(
+                        body=[
+                            cst.Return(
+                                value=cst.SimpleString(f'"{first_key}"')
+                            )
+                        ]
+                    )
+                ]
+            ),
+            leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
+        )
+        
+        # Insert before builder initialization
+        builder_assign_idx = -1
+        for i, stmt in enumerate(new_body):
+            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
+                builder_assign_idx = i
+                break
+        
+        if builder_assign_idx != -1:
+            new_body.insert(builder_assign_idx, router_def)
+        else:
+            new_body.append(router_def)
+
+    # 4. Insert the add_conditional_edges call
+    # Place it after other conditional edges or after standard edges
+    last_cond_idx = -1
+    last_edge_idx = -1
+    
+    # Re-evaluate body as it might have changed
+    for i, stmt in enumerate(new_body):
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
+            last_cond_idx = i
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+            last_edge_idx = i
+
+    if last_cond_idx != -1:
+        new_body.insert(last_cond_idx + 1, cond_stmt)
+    elif last_edge_idx != -1:
+        new_body.insert(last_edge_idx + 1, cond_stmt)
+    else:
+        # Fallback: after builder initialization
+        builder_assign_idx = -1
+        for i, stmt in enumerate(new_body):
+            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
+                builder_assign_idx = i
+        
+        if builder_assign_idx != -1:
+             new_body.insert(builder_assign_idx + 1, cond_stmt)
+        else:
+            new_body.append(cond_stmt)
+
+    return module.with_changes(body=new_body).code
+
 if __name__ == "__main__":
     import os
     

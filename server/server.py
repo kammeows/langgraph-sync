@@ -16,7 +16,8 @@ from parser_libcst import (
     RemoveEntryPointTransformer, # Added
     add_node_to_code,
     add_edge_to_code,
-    update_entry_point_in_code
+    update_entry_point_in_code,
+    add_conditional_edge_to_code
 )
 from transform import transform_to_react_flow
 
@@ -159,9 +160,20 @@ async def mutate_graph(request: MutationRequest):
             if request.source == "__start__":
                 transformer = RemoveEntryPointTransformer()
             else:
-                transformer = RemoveEdgeTransformer(request.source, request.target)
+                condition = request.payload.get("condition") if request.payload else None
+                transformer = RemoveEdgeTransformer(request.source, request.target, condition=condition)
             new_module = module.visit(transformer)
             updated_code = new_module.code
+
+        elif request.action == "add_conditional_edge":
+            # payload should contain {source, router_fn, mapping}
+            payload = request.payload
+            updated_code = add_conditional_edge_to_code(
+                source_code, 
+                payload["source"], 
+                payload["router_fn"], 
+                payload["mapping"]
+            )
 
         else:
             return {"status": "success", "received": request.action}

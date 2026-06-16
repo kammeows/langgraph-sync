@@ -14,6 +14,7 @@ import Editor from "@monaco-editor/react";
 import EditableNode from "./components/EditableNode";
 import DeletableEdge from "./components/DeletableEdge";
 import SelfLoopEdge from "./components/SelfLoopEdge";
+import ConditionalRouteModal from "./components/ConditionalRouteModal";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
@@ -35,6 +36,7 @@ function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
+  const [isCondModalOpen, setIsCondModalOpen] = useState(false);
   const editorRef = useRef(null);
 
   const handleEditorDidMount = (editor, monaco) => {
@@ -218,6 +220,7 @@ function App() {
             action: "delete_edge",
             source: edge.source,
             target: edge.target,
+            payload: { condition: edge.data?.condition },
           }),
         });
         if (response.ok) {
@@ -299,6 +302,23 @@ function App() {
     }
   }, [processGraphStateInternal, setCode]);
 
+  const onAddConditionalEdge = useCallback(async (payload) => {
+    try {
+      const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_conditional_edge", payload }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.code !== undefined) setCode(data.code);
+        processGraphStateInternal(data);
+      }
+    } catch (error) {
+      console.error("Add conditional edge failed:", error);
+    }
+  }, [processGraphStateInternal, setCode]);
+
   // Keep the handlers ref updated
   useEffect(() => {
     handlersRef.current = {
@@ -360,6 +380,13 @@ function App() {
         <div className="controls-container">
           <button className="add-node-btn" onClick={addNode}>
             + Add Node
+          </button>
+          <button 
+            className="add-node-btn" 
+            style={{ backgroundColor: "#8b5cf6" }}
+            onClick={() => setIsCondModalOpen(true)}
+          >
+            + Add Conditional Route
           </button>
           <button
             className="add-node-btn"
@@ -460,6 +487,13 @@ function App() {
           />
         </div>
       </div>
+
+      <ConditionalRouteModal 
+        isOpen={isCondModalOpen}
+        onClose={() => setIsCondModalOpen(false)}
+        onAdd={onAddConditionalEdge}
+        nodes={nodes}
+      />
     </div>
   );
 }
