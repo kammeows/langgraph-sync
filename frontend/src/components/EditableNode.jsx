@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import React, { useState, useEffect } from "react";
+import { Handle, Position } from "@xyflow/react";
 
 const EditableNode = ({ data, id, selected }) => {
   const [label, setLabel] = useState(data.label || id);
@@ -30,11 +30,12 @@ const EditableNode = ({ data, id, selected }) => {
     }
   };
 
-  const isStart = id === '__start__';
-  const isEnd = id === '__end__';
+  const isStart = id === "__start__";
+  const isEnd = id === "__end__";
 
   return (
     <div className={`editable-node-container ${data.type || ''} ${selected ? 'selected' : ''}`}>
+      {/* Target handle at the Top - arrows point HERE */}
       {!isStart && <Handle type="target" position={Position.Top} />}
       
       <div className="editable-node-body">
@@ -70,6 +71,7 @@ const EditableNode = ({ data, id, selected }) => {
         )}
       </div>
 
+      {/* Source handle at the Bottom - arrows start FROM here */}
       {!isEnd && <Handle type="source" position={Position.Bottom} />}
     </div>
   );

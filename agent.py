@@ -253,6 +253,10 @@ builder.add_conditional_edges(
 builder.add_edge("research", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
+builder.add_edge("report", "wikipedia_tool")
+builder.add_edge("tool", "report")
+builder.add_edge("report", "analysis")
+builder.add_edge("tool", "research")
 builder.add_edge("report", END)
 
 graph = builder.compile()

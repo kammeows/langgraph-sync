@@ -107,7 +107,7 @@ function App() {
           ...node.data,
           type: node.type,
           onDelete: (id) => {
-            if (id === "__start__" || id === "__end__") return;
+            if (id === "__start__") return;
             handlers.onDeleteNode && handlers.onDeleteNode(id);
           },
           onRename: (id, label) => {
@@ -121,12 +121,21 @@ function App() {
         const isConditional = edge.id.includes("-cond") || !!edge.label;
         const isStartEdge = edge.source === "__start__";
         const isSelfLoop = edge.source === edge.target;
-        
+
         return {
           ...edge,
           type: isSelfLoop ? "selfLoop" : "deletable",
-          markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: isStartEdge ? "#4caf50" : "#b1b1b7" },
-          style: { strokeWidth: isStartEdge ? 3 : 2, stroke: isStartEdge ? "#4caf50" : "#b1b1b7", ...edge.style },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 25,
+            height: 25,
+            color: isStartEdge ? "#22c55e" : "#333333",
+          },
+          style: {
+            strokeWidth: isStartEdge ? 3 : 2,
+            stroke: isStartEdge ? "#22c55e" : "#333333",
+            ...edge.style,
+          },
           deletable: true,
           data: {
             ...edge.data,
@@ -135,7 +144,7 @@ function App() {
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
             onDelete: (id) => {
-               handlers.onDeleteEdge && handlers.onDeleteEdge(id);
+              handlers.onDeleteEdge && handlers.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,
           },
@@ -225,6 +234,7 @@ function App() {
 
   const onConnect = useCallback(
     async (params) => {
+      console.log("Connect params:", params);
       if (params.target === "__start__") {
         alert("The START node cannot have incoming edges.");
         return;
@@ -345,13 +355,21 @@ function App() {
             className="add-node-btn"
             style={{ backgroundColor: "#f87171" }}
             onClick={() => {
-              // END is now always present by default, but this ensures a fresh fetch if needed
-              fetch("http://localhost:8000/api/graph")
-                .then((res) => res.json())
-                .then((data) => {
-                  if (data.code !== undefined) setCode(data.code);
-                  processGraphStateInternal(data);
-                });
+              // Manually add the END node if it doesn't exist
+              setNodes((nds) => {
+                if (nds.find((n) => n.id === "__end__")) return nds;
+                const endNode = {
+                  id: "__end__",
+                  type: "startNode",
+                  position: { x: 800, y: 200 },
+                  data: {
+                    label: "END",
+                    isEditable: false,
+                    deletable: true,
+                  },
+                };
+                return nds.concat(endNode);
+              });
             }}
           >
             + END Node
