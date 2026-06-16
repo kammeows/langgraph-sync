@@ -236,6 +236,10 @@ def publish_route(
 
     return "tool"
 
+
+def meow(state: AgentState):
+    return "mexico"
+
 # ---------------------------------
 # Graph
 # ---------------------------------
@@ -247,7 +251,6 @@ builder.add_node("research", research_agent)
 builder.add_node("tool", tool_agent)
 builder.add_node("analysis", analyst_agent)
 builder.add_node("report", report_agent)
-
 builder.set_entry_point("router")
 
 # builder.add_conditional_edges(
@@ -265,18 +268,10 @@ builder.add_conditional_edges(
     route_after_router
 )
 
-builder.add_conditional_edges(
-    "report",
-    publish_route,
-    {
-        "analysis": "analysis",
-        "__end__": END,
-    },
-)
-
 builder.add_edge("research", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
+builder.add_edge("router", "research")
 builder.add_edge("report", END)
 
 graph = builder.compile()

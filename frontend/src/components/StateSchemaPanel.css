@@ -1,0 +1,65 @@
+.state-schema-panel {
+  position: absolute;
+  left: 50px;
+  bottom: 600px; /* Positioned above the Validation Panel */
+  width: 300px;
+  background-color: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s ease;
+  max-height: 300px;
+}
+
+.state-schema-panel.collapsed {
+  max-height: 40px;
+}
+
+.schema-header {
+  padding: 10px 15px;
+  background-color: #252526;
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  font-weight: bold;
+  color: #569cd6; /* Blueish color to distinguish from validation */
+}
+
+.schema-header:hover {
+  background-color: #2d2d2d;
+}
+
+.schema-content {
+  overflow-y: auto;
+  padding: 12px;
+  flex: 1;
+}
+
+.schema-field {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 13px;
+}
+
+.field-key {
+  color: #9cdcfe; /* Parameter color */
+}
+
+.field-type {
+  color: #4ec9b0; /* Type color */
+  font-style: italic;
+}
+
+.collapse-icon {
+  color: #ccc;
+  font-size: 10px;
+}

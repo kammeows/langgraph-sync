@@ -155,19 +155,41 @@ def transform_to_react_flow(analyzer, tool_visitor):
             })
 
     # Node-level validations
+    state_keys = set(analyzer.state_schema.keys())
+    
     for node in nodes:
         node_id = node["id"]
         if node_id in ["__start__", "__end__"]: continue
         if node["type"] == "subToolNode": continue
         
+        # 1. Edge connectivity validation
         has_outgoing = any(e["source"] == node_id for e in edges)
         if not has_outgoing:
              warnings.append({
                 "type": "warning",
                 "message": f"Node '{node_id}' has no outgoing edges. It might be a dead end."
             })
+        
+        # 2. State schema validation
+        func_name = node["data"].get("functionName")
+        if func_name and func_name in analyzer.function_update_keys:
+            update_keys = analyzer.function_update_keys[func_name]
+            for uk in update_keys:
+                if state_keys and uk not in state_keys:
+                    warnings.append({
+                        "type": "error",
+                        "message": f"Node '{node_id}' returns key '{uk}', which is not defined in state schema '{analyzer.state_class_name}'."
+                    })
 
-    return {"nodes": nodes, "edges": edges, "warnings": warnings}
+    return {
+        "nodes": nodes, 
+        "edges": edges, 
+        "warnings": warnings,
+        "state_schema": {
+            "name": analyzer.state_class_name,
+            "fields": analyzer.state_schema
+        }
+    }
 
 if __name__ == "__main__":
     with open("agent.py", "r", encoding="utf8") as f:

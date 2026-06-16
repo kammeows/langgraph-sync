@@ -16,6 +16,7 @@ import DeletableEdge from "./components/DeletableEdge";
 import SelfLoopEdge from "./components/SelfLoopEdge";
 import ConditionalRouteModal from "./components/ConditionalRouteModal";
 import ValidationPanel from "./components/ValidationPanel";
+import StateSchemaPanel from "./components/StateSchemaPanel";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
@@ -36,6 +37,7 @@ function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [warnings, setWarnings] = useState([]);
+  const [stateSchema, setStateSchema] = useState(null);
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
@@ -160,8 +162,11 @@ function App() {
       if (data.warnings) {
         setWarnings(data.warnings);
       }
+      if (data.state_schema) {
+        setStateSchema(data.state_schema);
+      }
     },
-    [onRenameEdgeLabel, setNodes, setEdges, setWarnings],
+    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema],
   );
 
   // 4. Backend-Calling Handlers
@@ -469,6 +474,7 @@ function App() {
         </ReactFlow>
 
         <ValidationPanel warnings={warnings} />
+        <StateSchemaPanel schema={stateSchema} />
       </div>
 
       <div className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}>
