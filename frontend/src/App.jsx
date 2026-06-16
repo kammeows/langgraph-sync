@@ -20,6 +20,43 @@ import StateSchemaPanel from "./components/StateSchemaPanel";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
+import dagre from "dagre";
+
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+const nodeWidth = 172;
+const nodeHeight = 36;
+
+const getLayoutedElements = (nodes, edges, direction = "TB") => {
+  const isHorizontal = direction === "LR";
+  dagreGraph.setGraph({ rankdir: direction, nodesep: 70, ranksep: 100 });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const newNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      targetPosition: isHorizontal ? "left" : "top",
+      sourcePosition: isHorizontal ? "right" : "bottom",
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+    };
+  });
+
+  return { nodes: newNodes, edges };
+};
 
 const nodeTypes = {
   agentNode: EditableNode,
@@ -133,8 +170,8 @@ function App() {
           type: isSelfLoop ? "selfLoop" : "deletable",
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            width: 25,
-            height: 25,
+            width: 20,
+            height: 20,
             color: isStartEdge ? "#22c55e" : "#b1b1b7",
           },
           style: {
@@ -157,8 +194,22 @@ function App() {
         };
       });
 
-      setNodes(nodesWithHandlers);
-      setEdges(edgesWithHandlers);
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+        nodesWithHandlers,
+        edgesWithHandlers
+      );
+
+      // Ensure markerEnd is preserved or re-applied
+      const finalEdges = layoutedEdges.map(e => ({
+          ...e,
+          markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: e.source === "__start__" ? "#22c55e" : "#b1b1b7"
+          }
+      }));
+
+      setNodes(layoutedNodes);
+      setEdges(finalEdges);
       if (data.warnings) {
         setWarnings(data.warnings);
       }

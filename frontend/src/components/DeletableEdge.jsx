@@ -17,6 +17,9 @@ const DeletableEdge = ({
   markerEnd,
   data,
 }) => {
+  // Detect if this is a backward edge (cycle)
+  const isBackward = sourceY > targetY;
+  
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -24,7 +27,20 @@ const DeletableEdge = ({
     targetX,
     targetY,
     targetPosition,
+    curvature: isBackward ? 0.8 : 0.5, // Increase curvature for backward edges
   });
+
+  // For backward edges that would be straight, shift them horizontally
+  let finalPath = edgePath;
+  let finalLabelX = labelX;
+  let finalLabelY = labelY;
+
+  if (isBackward && Math.abs(sourceX - targetX) < 10) {
+      const shift = 80;
+      finalPath = `M ${sourceX} ${sourceY} C ${sourceX - shift} ${sourceY - 20}, ${targetX - shift} ${targetY + 20}, ${targetX} ${targetY}`;
+      finalLabelX = sourceX - shift;
+      finalLabelY = (sourceY + targetY) / 2;
+  }
 
   const [label, setLabel] = useState(data?.label || '');
   const [isEditing, setIsEditing] = useState(false);
@@ -51,12 +67,12 @@ const DeletableEdge = ({
 
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={edgeStyle} />
+      <BaseEdge path={finalPath} markerEnd={markerEnd} style={edgeStyle} />
       <EdgeLabelRenderer>
         <div
           style={{
             position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            transform: `translate(-50%, -50%) translate(${finalLabelX}px,${finalLabelY}px)`,
             fontSize: 12,
             pointerEvents: 'all',
             display: 'flex',

@@ -160,7 +160,7 @@ body {
   border-radius: 8px;
   background: white;
   border: 1px solid #ddd;
-  min-width: 120px;
+  min-width: 150px; /* Increased min-width */
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   transition: all 0.2s ease;
 }
