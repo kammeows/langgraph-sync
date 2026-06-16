@@ -129,11 +129,11 @@ function App() {
             type: MarkerType.ArrowClosed,
             width: 25,
             height: 25,
-            color: isStartEdge ? "#22c55e" : "#333333",
+            color: isStartEdge ? "#22c55e" : "#b1b1b7",
           },
           style: {
             strokeWidth: isStartEdge ? 3 : 2,
-            stroke: isStartEdge ? "#22c55e" : "#333333",
+            stroke: isStartEdge ? "#22c55e" : "#b1b1b7",
             ...edge.style,
           },
           deletable: true,
@@ -235,6 +235,16 @@ function App() {
   const onConnect = useCallback(
     async (params) => {
       console.log("Connect params:", params);
+      
+      // Prevent connections to/from virtual sub-tool nodes
+      const sourceNode = nodes.find((n) => n.id === params.source);
+      const targetNode = nodes.find((n) => n.id === params.target);
+      
+      if (sourceNode?.type === "subToolNode" || targetNode?.type === "subToolNode") {
+        alert("You cannot manually connect to or from virtual sub-tool nodes. These are inferred from function calls in your code.");
+        return;
+      }
+
       if (params.target === "__start__") {
         alert("The START node cannot have incoming edges.");
         return;
@@ -263,7 +273,7 @@ function App() {
         console.error("Connect failed:", error);
       }
     },
-    [processGraphStateInternal, setCode],
+    [nodes, processGraphStateInternal, setCode],
   );
 
   const addNode = useCallback(async () => {
