@@ -276,7 +276,7 @@ body {
   border: 1px solid #444;
   border-radius: 6px;
   padding: 8px 12px;
-  width: 140px;
+  width: 180px; /* Increased width for more info */
   text-align: left;
   z-index: 1000;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
@@ -313,12 +313,28 @@ body {
   margin-bottom: 2px;
 }
 
+.state-flow-title.implementation {
+  color: #ce9178; /* String color */
+}
+
 .state-flow-title.inputs {
   color: #569cd6;
 }
 
 .state-flow-title.outputs {
   color: #4ec9b0;
+}
+
+.state-flow-title.incoming {
+  color: #c586c0; /* Keyword color */
+}
+
+.state-flow-title.outgoing {
+  color: #c586c0;
+}
+
+.state-flow-title.cycle {
+  color: #f87171; /* Error red */
 }
 
 .state-flow-keys {

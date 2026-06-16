@@ -70,22 +70,54 @@ const EditableNode = ({ data, id, selected }) => {
           </button>
         )}
 
-        {/* State Flow Panel */}
+        {/* State Flow Panel (Expanded to Node Details) */}
         {selected && !isStart && !isEnd && (
           <div className="state-flow-panel">
-            <div className="state-flow-header">STATE FLOW</div>
+            <div className="state-flow-header">NODE DETAILS</div>
+            
+            <div className="state-flow-section">
+                <div className="state-flow-title implementation">IMPLEMENTATION</div>
+                <div className="state-flow-keys">
+                    {data.functionName ? `${data.functionName}()` : "none"}
+                </div>
+            </div>
+
             <div className="state-flow-section">
               <div className="state-flow-title inputs">INPUTS</div>
               <div className="state-flow-keys">
                 {data.inputs?.length > 0 ? data.inputs.join(", ") : "none"}
               </div>
             </div>
+
             <div className="state-flow-section">
               <div className="state-flow-title outputs">OUTPUTS</div>
               <div className="state-flow-keys">
                 {data.outputs?.length > 0 ? data.outputs.join(", ") : "none"}
               </div>
             </div>
+
+            <div className="state-flow-section">
+                <div className="state-flow-title incoming">INCOMING EDGES</div>
+                <div className="state-flow-keys">
+                    {data.incoming?.length > 0 ? data.incoming.join(", ") : "none"}
+                </div>
+            </div>
+
+            <div className="state-flow-section">
+                <div className="state-flow-title outgoing">OUTGOING EDGES</div>
+                <div className="state-flow-keys">
+                    {data.outgoing?.length > 0 ? data.outgoing.map(o => o === "__end__" ? "END" : o).join(", ") : "none"}
+                </div>
+            </div>
+
+            {data.cycle && (
+                <div className="state-flow-section">
+                    <div className="state-flow-title cycle">CYCLE DETECTED</div>
+                    <div className="state-flow-keys" style={{ color: "#f87171", fontWeight: "bold" }}>
+                        {data.cycle}
+                    </div>
+                </div>
+            )}
           </div>
         )}
       </div>

@@ -162,14 +162,41 @@ def transform_to_react_flow(analyzer, tool_visitor):
     # Node-level validations
     state_keys = set(analyzer.state_schema.keys())
     
+    # Pre-calculate adjacency for cycle detection and edge listing
+    adj = {n["id"]: [] for n in nodes}
+    for e in edges:
+        adj[e["source"]].append(e["target"])
+
+    def find_cycle(start_node):
+        # Simple DFS to find a cycle containing start_node
+        stack = [(start_node, [start_node])]
+        visited = set()
+        while stack:
+            (node, path) = stack.pop()
+            if node in adj:
+                for neighbor in adj[node]:
+                    if neighbor == start_node:
+                        return path + [start_node]
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        stack.append((neighbor, path + [neighbor]))
+        return None
+
     for node in nodes:
         node_id = node["id"]
         if node_id in ["__start__", "__end__"]: continue
         if node["type"] == "subToolNode": continue
         
-        # 1. Edge connectivity validation
-        has_outgoing = any(e["source"] == node_id for e in edges)
-        if not has_outgoing:
+        # 1. Edge connectivity validation & metadata
+        incoming = [e["source"] for e in edges if e["target"] == node_id]
+        outgoing = [e["target"] for e in edges if e["source"] == node_id]
+        cycle_path = find_cycle(node_id)
+        
+        node["data"]["incoming"] = incoming
+        node["data"]["outgoing"] = outgoing
+        node["data"]["cycle"] = " -> ".join(cycle_path) if cycle_path else None
+
+        if not outgoing:
              warnings.append({
                 "type": "warning",
                 "message": f"Node '{node_id}' has no outgoing edges. It might be a dead end."

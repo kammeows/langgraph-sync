@@ -253,20 +253,19 @@ builder.add_node("analysis", analyst_agent)
 builder.add_node("report", report_agent)
 builder.set_entry_point("router")
 
-# builder.add_conditional_edges(
-#     "router",
-#     route_after_router,
-#     {
-#         "research": "research",
-#         "tool": "tool",
-#     },
-# )
-
-
 builder.add_conditional_edges(
     "router",
-    route_after_router
+    route_after_router,
+    {
+        "research": "research",
+        "tool": "tool",
+    },
 )
+
+# builder.add_conditional_edges(
+#     "router",
+#     route_after_router
+# )
 
 builder.add_edge("research", "tool")
 builder.add_edge("tool", "analysis")
