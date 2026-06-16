@@ -266,3 +266,65 @@ body {
 .delete-edge-btn {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
+
+/* State Flow Panel Styles */
+.state-flow-panel {
+  position: absolute;
+  left: 110%;
+  top: 0;
+  background-color: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 140px;
+  text-align: left;
+  z-index: 1000;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-5px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.state-flow-header {
+  color: #888;
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #333;
+  padding-bottom: 2px;
+}
+
+.state-flow-section {
+  margin-bottom: 8px;
+}
+
+.state-flow-section:last-child {
+  margin-bottom: 0;
+}
+
+.state-flow-title {
+  font-size: 10px;
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.state-flow-title.inputs {
+  color: #569cd6;
+}
+
+.state-flow-title.outputs {
+  color: #4ec9b0;
+}
+
+.state-flow-keys {
+  color: #ccc;
+  font-size: 11px;
+  word-wrap: break-word;
+  font-family: 'Consolas', monospace;
+}
+

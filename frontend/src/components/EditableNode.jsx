@@ -69,6 +69,25 @@ const EditableNode = ({ data, id, selected }) => {
             &times;
           </button>
         )}
+
+        {/* State Flow Panel */}
+        {selected && !isStart && !isEnd && (
+          <div className="state-flow-panel">
+            <div className="state-flow-header">STATE FLOW</div>
+            <div className="state-flow-section">
+              <div className="state-flow-title inputs">INPUTS</div>
+              <div className="state-flow-keys">
+                {data.inputs?.length > 0 ? data.inputs.join(", ") : "none"}
+              </div>
+            </div>
+            <div className="state-flow-section">
+              <div className="state-flow-title outputs">OUTPUTS</div>
+              <div className="state-flow-keys">
+                {data.outputs?.length > 0 ? data.outputs.join(", ") : "none"}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Source handle at the Bottom - arrows start FROM here */}

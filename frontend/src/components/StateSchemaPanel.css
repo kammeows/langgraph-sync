@@ -1,6 +1,7 @@
 .state-schema-panel {
   position: absolute;
   left: 50px;
+  top: 70px;
   bottom: 600px; /* Positioned above the Validation Panel */
   width: 300px;
   background-color: #1e1e1e;

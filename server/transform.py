@@ -28,6 +28,9 @@ def transform_to_react_flow(analyzer, tool_visitor):
         is_tool = node_id and ("tool" in node_id.lower()) or (func_name and "tool" in func_name.lower())
         node_type = "toolNode" if is_tool else "agentNode"
         line_info = analyzer.function_lines.get(func_name) if func_name else None
+        
+        input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
+        output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
             
         nodes.append({
             "id": node_id,
@@ -38,7 +41,9 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "functionName": func_name,
                 "lines": line_info,
                 "isEditable": True,
-                "deletable": True
+                "deletable": True,
+                "inputs": input_keys,
+                "outputs": output_keys
             }
         })
         y_offset += 150

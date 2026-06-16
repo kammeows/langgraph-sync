@@ -10,13 +10,14 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.functions = []
         self.function_lines = {}
         self.function_returns = {}
-        self.function_update_keys = {} # New: keys updated in node return { "key": ... }
+        self.function_update_keys = {} 
+        self.function_input_keys = {} # New: keys read from state e.g. state["query"]
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
         self.entry_point = None
         self.state_class_name = None
-        self.state_schema = {} # New: { "key": "type" }
+        self.state_schema = {} 
         self._current_function = None
 
     # ----------------------------------
@@ -28,8 +29,14 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.functions.append(func_name)
         self.function_returns[func_name] = []
         self.function_update_keys[func_name] = []
+        self.function_input_keys[func_name] = []
         self._current_function = func_name
+        self._state_param_name = None
         
+        # Identify the state parameter name (usually 'state')
+        if node.params.params:
+            self._state_param_name = node.params.params[0].name.value
+
         # Capture line numbers using metadata
         pos = self.get_metadata(cst.metadata.PositionProvider, node)
         start_line = pos.start.line
@@ -38,6 +45,17 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
     def leave_FunctionDef(self, node: cst.FunctionDef):
         self._current_function = None
+        self._state_param_name = None
+
+    def visit_Subscript(self, node: cst.Subscript):
+        if self._current_function and self._state_param_name:
+            if isinstance(node.value, cst.Name) and node.value.value == self._state_param_name:
+                if len(node.slice) == 1:
+                    slc = node.slice[0].slice
+                    if isinstance(slc, cst.Index) and isinstance(slc.value, cst.SimpleString):
+                         self.function_input_keys[self._current_function].append(slc.value.evaluated_value)
+                    elif isinstance(slc, cst.SimpleString): 
+                         self.function_input_keys[self._current_function].append(slc.evaluated_value)
 
     def visit_Return(self, node: cst.Return):
         if self._current_function and node.value:
@@ -53,20 +71,13 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     if isinstance(el, cst.DictElement) and isinstance(el.key, cst.SimpleString):
                         self.function_update_keys[self._current_function].append(el.key.evaluated_value)
 
-    # ----------------------------------
-    # Collect State Definition
-    # ----------------------------------
-
     def visit_ClassDef(self, node: cst.ClassDef):
         class_name = node.name.value
-        # If we already found the state class name from builder = StateGraph(AgentState),
-        # or if it looks like a state class (ends with 'State' or inherits TypedDict)
         is_typed_dict = any(
             isinstance(base.value, cst.Name) and base.value.value == "TypedDict"
             for base in node.bases
         )
         
-        # We'll parse it if it matches the one used in StateGraph or if it's the first TypedDict
         if is_typed_dict or (self.state_class_name and class_name == self.state_class_name):
             schema = {}
             for item in node.body.body:
@@ -74,20 +85,22 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     for part in item.body:
                         if isinstance(part, cst.AnnAssign) and isinstance(part.target, cst.Name):
                             key = part.target.value
-                            # Get string representation of annotation
                             anno = "any"
                             if isinstance(part.annotation.annotation, cst.Name):
                                 anno = part.annotation.annotation.value
+                            elif isinstance(part.annotation.annotation, cst.Subscript):
+                                # Handle List[str], etc.
+                                anno = cst.parse_module("").code_for_node(part.annotation.annotation)
                             schema[key] = anno
             self.state_schema = schema
             if not self.state_class_name:
                 self.state_class_name = class_name
 
-    # ----------------------------------
-    # Collect builder calls
-    # ----------------------------------
-
     def visit_Call(self, node: cst.Call):
+        # Detect state.get("key")
+        if self._current_function and self._state_param_name and m.matches(node.func, m.Attribute(value=m.Name(self._state_param_name), attr=m.Name("get"))):
+            if node.args and isinstance(node.args[0].value, cst.SimpleString):
+                self.function_input_keys[self._current_function].append(node.args[0].value.evaluated_value)
 
         # ----------------------------------
         # StateGraph(AgentState)
