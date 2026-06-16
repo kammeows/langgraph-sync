@@ -9,10 +9,12 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         super().__init__()
         self.functions = []
         self.function_lines = {} # New: store {func_name: (start_line, end_line)}
+        self.function_returns = {} # New: store {func_name: [return_values]}
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
         self.entry_point = None
+        self._current_function = None
 
     # ----------------------------------
     # Collect all function defs
@@ -21,12 +23,25 @@ class LangGraphAnalyzer(cst.CSTVisitor):
     def visit_FunctionDef(self, node: cst.FunctionDef):
         func_name = node.name.value
         self.functions.append(func_name)
+        self.function_returns[func_name] = []
+        self._current_function = func_name
         
         # Capture line numbers using metadata
         pos = self.get_metadata(cst.metadata.PositionProvider, node)
         start_line = pos.start.line
         end_line = pos.end.line
         self.function_lines[func_name] = (start_line, end_line)
+
+    def leave_FunctionDef(self, node: cst.FunctionDef):
+        self._current_function = None
+
+    def visit_Return(self, node: cst.Return):
+        if self._current_function and node.value:
+            if isinstance(node.value, cst.SimpleString):
+                self.function_returns[self._current_function].append(node.value.evaluated_value)
+            elif isinstance(node.value, cst.Name) and node.value.value == "END":
+                self.function_returns[self._current_function].append("__end__")
+            # We could handle more types (Dict, etc.) if needed for routers
 
     # ----------------------------------
     # Collect builder.add_node(...)

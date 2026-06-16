@@ -227,6 +227,14 @@ def route_after_router(
 
     return "tool"
 
+def publish_route(
+    state: AgentState
+) -> Literal["tool", "research"]:
+
+    if state["intent"] == "research":
+        return "research"
+
+    return "tool"
 
 # ---------------------------------
 # Graph
@@ -242,21 +250,33 @@ builder.add_node("report", report_agent)
 
 builder.set_entry_point("router")
 
+# builder.add_conditional_edges(
+#     "router",
+#     route_after_router,
+#     {
+#         "research": "research",
+#         "tool": "tool",
+#     },
+# )
+
+
 builder.add_conditional_edges(
     "router",
-    route_after_router,
+    route_after_router
+)
+
+builder.add_conditional_edges(
+    "report",
+    publish_route,
     {
-        "research": "research",
-        "tool": "tool",
+        "analysis": "analysis",
+        "__end__": END,
     },
 )
+
 builder.add_edge("research", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
-builder.add_edge("report", "wikipedia_tool")
-builder.add_edge("tool", "report")
-builder.add_edge("report", "analysis")
-builder.add_edge("tool", "research")
 builder.add_edge("report", END)
 
 graph = builder.compile()

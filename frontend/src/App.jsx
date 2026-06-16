@@ -15,6 +15,7 @@ import EditableNode from "./components/EditableNode";
 import DeletableEdge from "./components/DeletableEdge";
 import SelfLoopEdge from "./components/SelfLoopEdge";
 import ConditionalRouteModal from "./components/ConditionalRouteModal";
+import ValidationPanel from "./components/ValidationPanel";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
@@ -34,6 +35,7 @@ const edgeTypes = {
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [warnings, setWarnings] = useState([]);
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
@@ -155,8 +157,11 @@ function App() {
 
       setNodes(nodesWithHandlers);
       setEdges(edgesWithHandlers);
+      if (data.warnings) {
+        setWarnings(data.warnings);
+      }
     },
-    [onRenameEdgeLabel, setNodes, setEdges],
+    [onRenameEdgeLabel, setNodes, setEdges, setWarnings],
   );
 
   // 4. Backend-Calling Handlers
@@ -462,6 +467,8 @@ function App() {
           <MiniMap />
           <Background variant="dots" gap={12} size={1} />
         </ReactFlow>
+
+        <ValidationPanel warnings={warnings} />
       </div>
 
       <div className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}>

@@ -5,6 +5,7 @@ from parser_libcst import LangGraphAnalyzer, ToolCallVisitor
 def transform_to_react_flow(analyzer, tool_visitor):
     nodes = []
     edges = []
+    warnings = []
     
     # 0. Add virtual START node (always present as it's the entry control)
     nodes.append({
@@ -50,6 +51,11 @@ def transform_to_react_flow(analyzer, tool_visitor):
             "target": analyzer.entry_point,
             "animated": True,
             "style": {"stroke": "#4caf50", "strokeWidth": 3}
+        })
+    else:
+        warnings.append({
+            "type": "error",
+            "message": "START node does not have an entry point edge. Use builder.set_entry_point()."
         })
 
     # 3. Process Sub-Tool Nodes
@@ -113,8 +119,19 @@ def transform_to_react_flow(analyzer, tool_visitor):
     # 5. Process Conditional Edges
     for cond in analyzer.conditional_edges:
         source = cond["source"]
+        router_fn = cond["router"]
         mapping = cond["mapping"]
         
+        # Validation: check if router function returns values not in mapping
+        if router_fn in analyzer.function_returns:
+            returns = analyzer.function_returns[router_fn]
+            for ret in returns:
+                if ret not in mapping:
+                    warnings.append({
+                        "type": "warning",
+                        "message": f"Router function '{router_fn}' returns '{ret}', but it is not mapped in builder.add_conditional_edges for node '{source}'."
+                    })
+
         for label, target in mapping.items():
             target_id = target
             if target == "__end__":
@@ -137,7 +154,20 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "data": {"condition": label}
             })
 
-    return {"nodes": nodes, "edges": edges}
+    # Node-level validations
+    for node in nodes:
+        node_id = node["id"]
+        if node_id in ["__start__", "__end__"]: continue
+        if node["type"] == "subToolNode": continue
+        
+        has_outgoing = any(e["source"] == node_id for e in edges)
+        if not has_outgoing:
+             warnings.append({
+                "type": "warning",
+                "message": f"Node '{node_id}' has no outgoing edges. It might be a dead end."
+            })
+
+    return {"nodes": nodes, "edges": edges, "warnings": warnings}
 
 if __name__ == "__main__":
     with open("agent.py", "r", encoding="utf8") as f:
