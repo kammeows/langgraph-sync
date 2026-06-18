@@ -11,7 +11,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.function_lines = {}
         self.function_returns = {}
         self.function_update_keys = {} 
-        self.function_input_keys = {} # New: keys read from state e.g. state["query"]
+        self.function_input_keys = {} 
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
@@ -19,6 +19,14 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self._current_function = None
+        self.graph_var_names = {"builder"} # Default, will append dynamically
+
+    def visit_Assign(self, node: cst.Assign):
+        # Look for: workflow = StateGraph(AgentState)
+        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
+            for target in node.targets:
+                if isinstance(target.target, cst.Name):
+                    self.graph_var_names.add(target.target.value)
 
     # ----------------------------------
     # Collect all function defs
@@ -73,12 +81,16 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
     def visit_ClassDef(self, node: cst.ClassDef):
         class_name = node.name.value
-        is_typed_dict = any(
-            isinstance(base.value, cst.Name) and base.value.value == "TypedDict"
+        # Check if it inherits from TypedDict, MessagesState, or if it has 'State' in the name
+        is_state_class = any(
+            isinstance(base.value, cst.Name) and base.value.value in ["TypedDict", "MessagesState"]
             for base in node.bases
-        )
+        ) or "State" in class_name
         
-        if is_typed_dict or (self.state_class_name and class_name == self.state_class_name):
+        # If it's a state class, parse it.
+        # We will keep the schema of the last state class found if multiple,
+        # or exactly the one that matches self.state_class_name if it was already found.
+        if is_state_class or (self.state_class_name and class_name == self.state_class_name):
             schema = {}
             for item in node.body.body:
                 if isinstance(item, cst.SimpleStatementLine):
@@ -89,9 +101,18 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                             if isinstance(part.annotation.annotation, cst.Name):
                                 anno = part.annotation.annotation.value
                             elif isinstance(part.annotation.annotation, cst.Subscript):
-                                # Handle List[str], etc.
-                                anno = cst.parse_module("").code_for_node(part.annotation.annotation)
+                                # Extract string representation of Subscript
+                                try:
+                                    anno = cst.parse_module("").code_for_node(part.annotation.annotation)
+                                except Exception:
+                                    anno = "complex_type"
                             schema[key] = anno
+            
+            # If it's MessagesState, it implicitly has 'messages'
+            if any(isinstance(base.value, cst.Name) and base.value.value == "MessagesState" for base in node.bases):
+                if "messages" not in schema:
+                    schema["messages"] = "list"
+
             self.state_schema = schema
             if not self.state_class_name:
                 self.state_class_name = class_name
@@ -111,127 +132,107 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 if isinstance(arg0, cst.Name):
                     self.state_class_name = arg0.value
 
-        # ----------------------------------
-        # builder.add_node(...)
-        # ----------------------------------
-        if m.matches(
-            node.func,
-            m.Attribute(
-                value=m.Name("builder"),
-                attr=m.Name("add_node")
-            )
-        ):
+        # Extract object name and method name
+        if isinstance(node.func, cst.Attribute) and isinstance(node.func.value, cst.Name):
+            obj_name = node.func.value.value
+            method_name = node.func.attr.value
 
-            if len(node.args) >= 2:
+            if obj_name in self.graph_var_names:
+                
+                # ----------------------------------
+                # workflow.add_node(...)
+                # ----------------------------------
+                if method_name == "add_node" and len(node.args) >= 2:
+                    node_name = None
+                    function_name = None
 
-                node_name = None
-                function_name = None
+                    if isinstance(node.args[0].value, cst.SimpleString):
+                        node_name = node.args[0].value.evaluated_value
 
-                if isinstance(node.args[0].value, cst.SimpleString):
-                    node_name = node.args[0].value.evaluated_value
+                    arg1 = node.args[1].value
+                    if isinstance(arg1, cst.Name):
+                        function_name = arg1.value
+                    elif isinstance(arg1, cst.Call) and isinstance(arg1.func, cst.Name) and arg1.func.value == "ToolNode":
+                        function_name = "ToolNode" # Special marker for tools
 
-                if isinstance(node.args[1].value, cst.Name):
-                    function_name = node.args[1].value.value
+                    if node_name:
+                        self.nodes[node_name] = function_name
 
-                self.nodes[node_name] = function_name
+                # ----------------------------------
+                # workflow.add_edge(...)
+                # ----------------------------------
+                elif method_name == "add_edge" and len(node.args) >= 2:
+                    src = node.args[0].value
+                    dst = node.args[1].value
 
-        # ----------------------------------
-        # builder.add_edge(...)
-        # ----------------------------------
+                    src_val = None
+                    dst_val = None
 
-        if m.matches(
-            node.func,
-            m.Attribute(
-                value=m.Name("builder"),
-                attr=m.Name("add_edge")
-            )
-        ):
+                    # Handle START constant or "__start__"
+                    if isinstance(src, cst.SimpleString):
+                        src_val = src.evaluated_value
+                    elif isinstance(src, cst.Name) and src.value == "START":
+                        src_val = "__start__"
 
-            if len(node.args) >= 2:
+                    if isinstance(dst, cst.SimpleString):
+                        dst_val = dst.evaluated_value
+                    elif isinstance(dst, cst.Name) and dst.value == "END":
+                        dst_val = "__end__"
 
-                src = node.args[0].value
-                dst = node.args[1].value
+                    if src_val and dst_val:
+                        # If src is START, treat it as an entry point as well
+                        if src_val == "__start__":
+                            self.entry_point = dst_val
+                        self.edges.append((src_val, dst_val))
 
-                src_val = None
-                dst_val = None
+                # ----------------------------------
+                # workflow.set_entry_point(...)
+                # ----------------------------------
+                elif method_name == "set_entry_point" and len(node.args) >= 1:
+                    arg0 = node.args[0].value
+                    if isinstance(arg0, cst.SimpleString):
+                        self.entry_point = arg0.evaluated_value
+                        # Also add an edge from START
+                        self.edges.append(("__start__", self.entry_point))
+        
+                # ----------------------------------
+                # workflow.add_conditional_edges(...)
+                # ----------------------------------
+                elif method_name == "add_conditional_edges" and len(node.args) >= 2:
+                    source = None
+                    router_fn = None
 
-                if isinstance(src, cst.SimpleString):
-                    src_val = src.evaluated_value
+                    if isinstance(node.args[0].value, cst.SimpleString):
+                        source = node.args[0].value.evaluated_value
+                    elif isinstance(node.args[0].value, cst.Name) and node.args[0].value.value == "START":
+                        source = "__start__"
 
-                if isinstance(dst, cst.SimpleString):
-                    dst_val = dst.evaluated_value
-                elif isinstance(dst, cst.Name) and dst.value == "END":
-                    dst_val = "__end__"
+                    if isinstance(node.args[1].value, cst.Name):
+                        router_fn = node.args[1].value.value
 
-                if src_val and dst_val:
-                    self.edges.append((src_val, dst_val))
+                    # Extract mapping
+                    mapping = {}
+                    if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
+                        for elt in node.args[2].value.elements:
+                            if isinstance(elt, cst.DictElement):
+                                key = None
+                                val = None
+                                if isinstance(elt.key, cst.SimpleString):
+                                    key = elt.key.evaluated_value
+                                if isinstance(elt.value, cst.SimpleString):
+                                    val = elt.value.evaluated_value
+                                elif isinstance(elt.value, cst.Name) and elt.value.value == "END":
+                                    val = "__end__"
+                                if key and val:
+                                    mapping[key] = val
 
-        # ----------------------------------
-        # builder.set_entry_point(...)
-        # ----------------------------------
-
-        if m.matches(
-            node.func,
-            m.Attribute(
-                value=m.Name("builder"),
-                attr=m.Name("set_entry_point")
-            )
-        ):
-            if len(node.args) >= 1:
-                arg0 = node.args[0].value
-                if isinstance(arg0, cst.SimpleString):
-                    self.entry_point = arg0.evaluated_value
-    
-        # ----------------------------------
-        # builder.add_conditional_edges(...)
-        # ----------------------------------
-
-        if m.matches(
-            node.func,
-            m.Attribute(
-                value=m.Name("builder"),
-                attr=m.Name("add_conditional_edges")
-            )
-        ):
-
-            if len(node.args) >= 3:
-
-                source = None
-                router_fn = None
-
-                if isinstance(
-                    node.args[0].value,
-                    cst.SimpleString
-                ):
-                    source = node.args[0].value.evaluated_value
-
-                if isinstance(
-                    node.args[1].value,
-                    cst.Name
-                ):
-                    router_fn = node.args[1].value.value
-
-                # Extract mapping
-                mapping = {}
-                if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
-                    for elt in node.args[2].value.elements:
-                        if isinstance(elt, cst.DictElement):
-                            key = None
-                            val = None
-                            if isinstance(elt.key, cst.SimpleString):
-                                key = elt.key.evaluated_value
-                            if isinstance(elt.value, cst.SimpleString):
-                                val = elt.value.evaluated_value
-                            if key and val:
-                                mapping[key] = val
-
-                self.conditional_edges.append(
-                    {
-                        "source": source,
-                        "router": router_fn,
-                        "mapping": mapping
-                    }
-                )
+                    self.conditional_edges.append(
+                        {
+                            "source": source,
+                            "router": router_fn,
+                            "mapping": mapping
+                        }
+                    )
 
 class SetEntryPointTransformer(cst.CSTTransformer):
     def __init__(self, target_id: str):
