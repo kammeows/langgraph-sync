@@ -19,7 +19,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self._current_function = None
-        self.graph_var_names = {"builder"} # Default, will append dynamically
+        self.graph_var_names = set() # Changed from {"builder"} to set() to avoid random choice
 
     def visit_Assign(self, node: cst.Assign):
         # Look for: workflow = StateGraph(AgentState)
@@ -180,10 +180,11 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         dst_val = "__end__"
 
                     if src_val and dst_val:
-                        # If src is START, treat it as an entry point as well
+                        # If src is START, treat it as an entry point exclusively
                         if src_val == "__start__":
                             self.entry_point = dst_val
-                        self.edges.append((src_val, dst_val))
+                        else:
+                            self.edges.append((src_val, dst_val))
 
                 # ----------------------------------
                 # workflow.set_entry_point(...)
@@ -192,8 +193,6 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     arg0 = node.args[0].value
                     if isinstance(arg0, cst.SimpleString):
                         self.entry_point = arg0.evaluated_value
-                        # Also add an edge from START
-                        self.edges.append(("__start__", self.entry_point))
         
                 # ----------------------------------
                 # workflow.add_conditional_edges(...)
@@ -235,55 +234,123 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     )
 
 class SetEntryPointTransformer(cst.CSTTransformer):
-    def __init__(self, target_id: str):
+    def __init__(self, target_id: str, graph_var: str):
         self.target_id = target_id
+        self.graph_var = graph_var
         self.found = False
 
     def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
-            self.found = True
+        # Handle set_entry_point
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("set_entry_point"))))])):
             call = updated_node.body[0].value
-            new_args = [cst.Arg(value=cst.SimpleString(f'"{self.target_id}"'))]
-            return updated_node.with_changes(
-                body=[cst.Expr(value=call.with_changes(args=new_args))]
-            )
+            if isinstance(call.func.value, cst.Name) and call.func.value.value == self.graph_var:
+                self.found = True
+                new_args = [cst.Arg(value=cst.SimpleString(f'"{self.target_id}"'))]
+                return updated_node.with_changes(
+                    body=[cst.Expr(value=call.with_changes(args=new_args))]
+                )
+        
+        # Handle add_edge(START, ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_edge"))))])):
+            call = updated_node.body[0].value
+            if isinstance(call.func.value, cst.Name) and call.func.value.value == self.graph_var:
+                if len(call.args) >= 2:
+                    arg0 = call.args[0].value
+                    if (isinstance(arg0, cst.Name) and arg0.value == "START") or (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == "__start__"):
+                        self.found = True
+                        new_args = list(call.args)
+                        new_args[1] = cst.Arg(value=cst.SimpleString(f'"{self.target_id}"'))
+                        return updated_node.with_changes(
+                            body=[cst.Expr(value=call.with_changes(args=new_args))]
+                        )
+        return updated_node
+
+class EnsureStartImportTransformer(cst.CSTTransformer):
+    def __init__(self):
+        self.found = False
+        self.import_inserted = False
+
+    def leave_ImportFrom(self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom):
+        # Check if importing from langgraph.graph
+        is_langgraph_graph = False
+        if isinstance(updated_node.module, cst.Name) and updated_node.module.value == "graph":
+            # This might just be 'graph', not robust but okay
+            pass
+        elif isinstance(updated_node.module, cst.Attribute) and isinstance(updated_node.module.value, cst.Name) and updated_node.module.value.value == "langgraph" and updated_node.module.attr.value == "graph":
+            is_langgraph_graph = True
+
+        if is_langgraph_graph and not isinstance(updated_node.names, cst.ImportStar):
+            for name in updated_node.names:
+                if name.name.value == "START":
+                    self.found = True
+            
+            if not self.found and not self.import_inserted:
+                # Add START to the existing import
+                new_names = list(updated_node.names)
+                # Add a comma separator for the previous last element if needed, though LibCST usually handles simple appends or we just replace the whole statement
+                # To be safe with LibCST formatting, it's easier to just append a new import statement at the top if START is completely missing
+                pass
+
+        return updated_node
+
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module):
+        if not self.found and not self.import_inserted:
+            # We need to add `from langgraph.graph import START`
+            new_import = cst.parse_statement("from langgraph.graph import START\n")
+            new_body = list(updated_node.body)
+            
+            # Find the last import to put it after
+            last_import_idx = -1
+            for i, stmt in enumerate(new_body):
+                if isinstance(stmt, cst.SimpleStatementLine) and any(isinstance(body, (cst.Import, cst.ImportFrom)) for body in stmt.body):
+                    last_import_idx = i
+            
+            if last_import_idx != -1:
+                new_body.insert(last_import_idx + 1, new_import)
+            else:
+                new_body.insert(0, new_import)
+                
+            self.import_inserted = True
+            return updated_node.with_changes(body=new_body)
         return updated_node
 
 def update_entry_point_in_code(source_code: str, target_id: str) -> str:
     module = cst.parse_module(source_code)
-    transformer = SetEntryPointTransformer(target_id)
+    
+    analyzer = LangGraphAnalyzer()
+    cst.metadata.MetadataWrapper(module).visit(analyzer)
+    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+    
+    transformer = SetEntryPointTransformer(target_id, graph_var)
     new_module = module.visit(transformer)
     
-    if transformer.found:
-        return new_module.code
-    
-    # If not found, add it
-    new_body = list(new_module.body)
-    entry_stmt = cst.SimpleStatementLine(
-        body=[
-            cst.Expr(
-                value=cst.Call(
-                    func=cst.Attribute(value=cst.Name("builder"), attr=cst.Name("set_entry_point")),
-                    args=[cst.Arg(value=cst.SimpleString(f'"{target_id}"'))]
+    if not transformer.found:
+        # If not found, add it as graph_var.add_edge(START, "target_id")
+        entry_stmt = cst.SimpleStatementLine(
+            body=[
+                cst.Expr(
+                    value=cst.Call(
+                        func=cst.Attribute(value=cst.Name(graph_var), attr=cst.Name("add_edge")),
+                        args=[cst.Arg(value=cst.Name("START")), cst.Arg(value=cst.SimpleString(f'"{target_id}"'))]
+                    )
                 )
-            )
-        ]
-    )
-    
-    # Place it after builder initialization or after last add_node
-    insert_idx = -1
-    for i, stmt in enumerate(new_body):
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
-            insert_idx = i
-        elif insert_idx == -1 and m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
-             insert_idx = i
-             
-    if insert_idx != -1:
-        new_body.insert(insert_idx + 1, entry_stmt)
-    else:
-        new_body.append(entry_stmt)
+            ]
+        )
         
-    return new_module.with_changes(body=new_body).code
+        inserter = GraphCallInserter(entry_stmt, graph_var, "add_node")
+        new_module = new_module.visit(inserter)
+        
+        if not inserter.inserted:
+            # Fallback
+            final_body = list(new_module.body)
+            final_body.append(entry_stmt)
+            new_module = new_module.with_changes(body=final_body)
+
+    # Ensure START is imported since we are using it
+    import_transformer = EnsureStartImportTransformer()
+    final_module = new_module.visit(import_transformer)
+
+    return final_module.code
 
 class RemoveEdgeTransformer(cst.CSTTransformer):
     def __init__(self, src: str, dst: str, condition: str = None):
@@ -292,15 +359,16 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
         self.condition = condition
 
     def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
-        # 1. Handle builder.add_edge(...)
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+        # 1. Handle any_graph.add_edge(...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_edge"))))])):
             expr = updated_node.body[0]
             call = expr.value
             if len(call.args) >= 2:
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
                 
-                match_src = isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src
+                match_src = (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src) or \
+                            (isinstance(arg0, cst.Name) and arg0.value == "START" and self.src == "__start__")
                 
                 match_dst = False
                 if isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.dst:
@@ -311,14 +379,18 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                 if match_src and match_dst:
                     return cst.RemoveFromParent()
 
-        # 2. Handle builder.add_conditional_edges(...)
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
+        # 2. Handle any_graph.add_conditional_edges(...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
             expr = updated_node.body[0]
             call = expr.value
             if len(call.args) >= 3:
                 # Arg 0: Source node ID
                 arg0 = call.args[0].value
-                if not (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src):
+                
+                match_src = (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src) or \
+                            (isinstance(arg0, cst.Name) and arg0.value == "START" and self.src == "__start__")
+                            
+                if not match_src:
                     return updated_node
                 
                 # Arg 2: Mapping dictionary {"label": "target"}
@@ -327,9 +399,6 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                     new_elements = []
                     for el in arg2.elements:
                         if isinstance(el, cst.DictElement):
-                            # Usually keys are condition strings, values are target node strings
-                            # We want to remove the entry where key == condition OR value == dst
-                            # (If condition is provided, use that for precision)
                             key_match = False
                             if self.condition and isinstance(el.key, cst.SimpleString) and el.key.evaluated_value == self.condition:
                                 key_match = True
@@ -364,15 +433,15 @@ class RemoveNodeTransformer(cst.CSTTransformer):
         self.node_id = node_id
 
     def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
-        # 1. builder.add_node("node_id", ...)
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
+        # 1. any_graph.add_node("node_id", ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_node"))))])):
             call = updated_node.body[0].value
             if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
                 if call.args[0].value.evaluated_value == self.node_id:
                     return cst.RemoveFromParent()
 
-        # 2. builder.add_edge("node_id", ...) or builder.add_edge(..., "node_id")
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
+        # 2. any_graph.add_edge("node_id", ...) or any_graph.add_edge(..., "node_id")
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_edge"))))])):
             call = updated_node.body[0].value
             if len(call.args) >= 2:
                 arg0 = call.args[0].value
@@ -383,15 +452,15 @@ class RemoveNodeTransformer(cst.CSTTransformer):
                 if match_src or match_dst:
                     return cst.RemoveFromParent()
 
-        # 3. builder.add_conditional_edges("node_id", ...)
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
+        # 3. any_graph.add_conditional_edges("node_id", ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
             call = updated_node.body[0].value
             if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
                 if call.args[0].value.evaluated_value == self.node_id:
                     return cst.RemoveFromParent()
 
-        # 4. builder.set_entry_point("node_id")
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
+        # 4. any_graph.set_entry_point("node_id")
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("set_entry_point"))))])):
             call = updated_node.body[0].value
             if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
                 if call.args[0].value.evaluated_value == self.node_id:
@@ -406,15 +475,49 @@ class RemoveNodeTransformer(cst.CSTTransformer):
         return updated_node
 
 class RemoveEntryPointTransformer(cst.CSTTransformer):
+    def __init__(self):
+        self.graph_var = None
+
+    def visit_Assign(self, node: cst.Assign):
+        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
+            for target in node.targets:
+                if isinstance(target.target, cst.Name):
+                    self.graph_var = target.target.value
+
     def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
-        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))))])):
+        # Handle set_entry_point
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("set_entry_point"))))])):
+            # Verify it's on the graph variable if we know it
+            call = updated_node.body[0].value
+            if self.graph_var and isinstance(call.func.value, cst.Name) and call.func.value.value != self.graph_var:
+                return updated_node
             return cst.RemoveFromParent()
+        
+        # Handle add_edge(START, ...)
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_edge"))))])):
+            call = updated_node.body[0].value
+            if self.graph_var and isinstance(call.func.value, cst.Name) and call.func.value.value != self.graph_var:
+                return updated_node
+                
+            if len(call.args) >= 2:
+                arg0 = call.args[0].value
+                if isinstance(arg0, cst.Name) and arg0.value == "START":
+                    return cst.RemoveFromParent()
+                if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == "__start__":
+                    return cst.RemoveFromParent()
+
         return updated_node
 
 def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
     module = cst.parse_module(source_code)
     
-    # Create builder.add_edge("src", "dst" or END)
+    analyzer = LangGraphAnalyzer()
+    wrapper = cst.metadata.MetadataWrapper(module)
+    wrapper.visit(analyzer)
+    
+    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+    
+    # Create graph_var.add_edge("src", "dst" or END)
     dst_node = cst.Name("END") if dst == "__end__" else cst.SimpleString(f'"{dst}"')
     
     edge_stmt = cst.SimpleStatementLine(
@@ -422,7 +525,7 @@ def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
             cst.Expr(
                 value=cst.Call(
                     func=cst.Attribute(
-                        value=cst.Name("builder"),
+                        value=cst.Name(graph_var),
                         attr=cst.Name("add_edge")
                     ),
                     args=[
@@ -434,34 +537,15 @@ def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
         ]
     )
 
-    new_body = list(module.body)
-    last_edge_idx = -1
-    builder_assign_idx = -1
+    inserter = GraphCallInserter(edge_stmt, graph_var, "add_edge")
+    final_module = module.visit(inserter)
+    
+    if not inserter.inserted:
+        final_body = list(final_module.body)
+        final_body.append(edge_stmt)
+        final_module = final_module.with_changes(body=final_body)
 
-    for i, stmt in enumerate(new_body):
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
-            last_edge_idx = i
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
-            builder_assign_idx = i
-
-    if last_edge_idx != -1:
-        new_body.insert(last_edge_idx + 1, edge_stmt)
-    elif builder_assign_idx != -1:
-        # If no edges yet, put it after builder.add_node calls or just after builder init
-        # Finding last add_node would be better
-        last_node_idx = -1
-        for i, stmt in enumerate(new_body):
-             if m.matches(stmt, m.SimpleStatementLine(body=[m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node")))])):
-                 last_node_idx = i
-        
-        if last_node_idx != -1:
-            new_body.insert(last_node_idx + 1, edge_stmt)
-        else:
-            new_body.insert(builder_assign_idx + 1, edge_stmt)
-    else:
-        new_body.append(edge_stmt)
-
-    return module.with_changes(body=new_body).code
+    return final_module.code
 
 class ToolCallVisitor(cst.CSTVisitor):
 
@@ -498,8 +582,8 @@ class RenameNodeTransformer(cst.CSTTransformer):
         self.new_id = new_id
 
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call):
-        # Handle builder.add_node("old_id", ...)
-        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))):
+        # Handle any_graph.add_node("old_id", ...)
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("add_node"))):
             if len(updated_node.args) >= 1:
                 arg0 = updated_node.args[0].value
                 if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.old_id:
@@ -510,8 +594,8 @@ class RenameNodeTransformer(cst.CSTTransformer):
                     new_args[0] = new_arg
                     return updated_node.with_changes(args=new_args)
 
-        # Handle builder.add_edge("old_id", ...) or builder.add_edge(..., "old_id")
-        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))):
+        # Handle any_graph.add_edge("old_id", ...) or any_graph.add_edge(..., "old_id")
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("add_edge"))):
             new_args = list(updated_node.args)
             changed = False
             for i in range(min(2, len(new_args))):
@@ -522,8 +606,8 @@ class RenameNodeTransformer(cst.CSTTransformer):
             if changed:
                 return updated_node.with_changes(args=new_args)
 
-        # Handle builder.add_conditional_edges("old_id", ...)
-        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))):
+        # Handle any_graph.add_conditional_edges("old_id", ...)
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("add_conditional_edges"))):
             new_args = list(updated_node.args)
             changed = False
             if len(new_args) >= 1:
@@ -534,8 +618,8 @@ class RenameNodeTransformer(cst.CSTTransformer):
             if changed:
                 return updated_node.with_changes(args=new_args)
 
-        # Handle builder.set_entry_point("old_id")
-        if m.matches(original_node.func, m.Attribute(value=m.Name("builder"), attr=m.Name("set_entry_point"))):
+        # Handle any_graph.set_entry_point("old_id")
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("set_entry_point"))):
             if len(updated_node.args) >= 1:
                 arg = updated_node.args[0].value
                 if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
@@ -554,16 +638,50 @@ class RenameNodeTransformer(cst.CSTTransformer):
             return updated_node.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
         return updated_node
 
+class GraphCallInserter(cst.CSTTransformer):
+    def __init__(self, stmt_to_insert: cst.SimpleStatementLine, graph_var: str, method_to_follow: str):
+        self.stmt_to_insert = stmt_to_insert
+        self.graph_var = graph_var
+        self.method_to_follow = method_to_follow
+        self.inserted = False
+
+    def leave_IndentedBlock(self, original_node: cst.IndentedBlock, updated_node: cst.IndentedBlock):
+        if not self.inserted:
+            return self._insert_in_body(updated_node)
+        return updated_node
+
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module):
+        if not self.inserted:
+            return self._insert_in_body(updated_node)
+        return updated_node
+
+    def _insert_in_body(self, node):
+        new_body = []
+        last_idx = -1
+        
+        for i, stmt in enumerate(node.body):
+            if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name(self.graph_var), attr=m.Name(self.method_to_follow))))])):
+                last_idx = i
+            elif last_idx == -1 and m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name(self.graph_var))])])):
+                last_idx = i
+
+        if last_idx != -1:
+            new_body = list(node.body)
+            new_body.insert(last_idx + 1, self.stmt_to_insert)
+            self.inserted = True
+            return node.with_changes(body=new_body)
+        return node
+
 def add_node_to_code(source_code: str, node_name: str) -> str:
     module = cst.parse_module(source_code)
     
-    # Get state class name
     analyzer = LangGraphAnalyzer()
     wrapper = cst.metadata.MetadataWrapper(module)
     wrapper.visit(analyzer)
+    
     state_name = analyzer.state_class_name or "AgentState"
+    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
 
-    # 1. Create the function definition
     func_def = cst.FunctionDef(
         name=cst.Name(node_name),
         params=cst.Parameters(
@@ -588,14 +706,12 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
         leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
     )
     
-    # 2. Create the builder.add_node call
-    # builder.add_node("node_name", node_name)
     call_stmt = cst.SimpleStatementLine(
         body=[
             cst.Expr(
                 value=cst.Call(
                     func=cst.Attribute(
-                        value=cst.Name("builder"),
+                        value=cst.Name(graph_var),
                         attr=cst.Name("add_node")
                     ),
                     args=[
@@ -609,38 +725,49 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
 
     new_body = list(module.body)
     
-    # Find insertion points
-    builder_assign_idx = -1
-    last_add_node_idx = -1
-    
+    # We will inject the function definition at the module level.
+    # To find the best place, we can put it right before the function that defines the graph, 
+    # or just before the graph assignment if global.
+    insert_idx = -1
     for i, stmt in enumerate(new_body):
-        # Match builder = StateGraph(...)
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
-            builder_assign_idx = i
-        
-        # Match builder.add_node(...)
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_node"))))])):
-            last_add_node_idx = i
+        # Look for the graph assignment globally
+        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name(graph_var))])])):
+            insert_idx = i
+            break
+        # Or look for a function that contains it
+        if m.matches(stmt, m.FunctionDef()) and any("StateGraph" in cst.parse_module("").code_for_node(stmt) for _ in [1]):
+            # Simple heuristic
+            insert_idx = i
+            break
 
-    if builder_assign_idx != -1:
-        # Insert function before builder assignment
-        new_body.insert(builder_assign_idx, func_def)
-        
-        # Adjust indices as body changed
-        if last_add_node_idx != -1:
-            shifted_last_idx = last_add_node_idx + 1
-            new_body.insert(shifted_last_idx + 1, call_stmt)
-        else:
-            new_body.insert(builder_assign_idx + 2, call_stmt)
+    if insert_idx != -1:
+        new_body.insert(insert_idx, func_def)
     else:
         new_body.append(func_def)
-        new_body.append(call_stmt)
-        
-    return module.with_changes(body=new_body).code
+
+    new_module = module.with_changes(body=new_body)
+
+    # Now inject the add_node call inside the correct block
+    inserter = GraphCallInserter(call_stmt, graph_var, "add_node")
+    final_module = new_module.visit(inserter)
+    
+    if not inserter.inserted:
+        final_body = list(final_module.body)
+        final_body.append(call_stmt)
+        final_module = final_module.with_changes(body=final_body)
+
+    return final_module.code
 
 def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:
     module = cst.parse_module(source_code)
     
+    analyzer = LangGraphAnalyzer()
+    wrapper = cst.metadata.MetadataWrapper(module)
+    wrapper.visit(analyzer)
+    
+    state_name = analyzer.state_class_name or "AgentState"
+    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+
     # 1. Create mapping dictionary
     dict_elements = []
     for key, val in mapping.items():
@@ -654,13 +781,13 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
     
     mapping_dict = cst.Dict(elements=dict_elements)
     
-    # 2. Create builder.add_conditional_edges call
+    # 2. Create graph_var.add_conditional_edges call
     cond_stmt = cst.SimpleStatementLine(
         body=[
             cst.Expr(
                 value=cst.Call(
                     func=cst.Attribute(
-                        value=cst.Name("builder"),
+                        value=cst.Name(graph_var),
                         attr=cst.Name("add_conditional_edges")
                     ),
                     args=[
@@ -676,14 +803,7 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
     new_body = list(module.body)
     
     # 3. Check if router_fn exists, if not add a skeleton
-    analyzer = LangGraphAnalyzer()
-    wrapper = cst.metadata.MetadataWrapper(module)
-    wrapper.visit(analyzer)
-    
     if router_fn not in analyzer.functions:
-        # Create skeleton:
-        # def router_fn(state: AgentState):
-        #     return "key"
         first_key = list(mapping.keys())[0] if mapping else "next"
         router_def = cst.FunctionDef(
             name=cst.Name(router_fn),
@@ -691,7 +811,7 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
                 params=[
                     cst.Param(
                         name=cst.Name("state"),
-                        annotation=cst.Annotation(annotation=cst.Name("AgentState"))
+                        annotation=cst.Annotation(annotation=cst.Name(state_name))
                     )
                 ]
             ),
@@ -709,47 +829,33 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
             leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
         )
         
-        # Insert before builder initialization
-        builder_assign_idx = -1
+        insert_idx = -1
         for i, stmt in enumerate(new_body):
-            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
-                builder_assign_idx = i
+            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name(graph_var))])])):
+                insert_idx = i
+                break
+            if m.matches(stmt, m.FunctionDef()) and any("StateGraph" in cst.parse_module("").code_for_node(stmt) for _ in [1]):
+                insert_idx = i
                 break
         
-        if builder_assign_idx != -1:
-            new_body.insert(builder_assign_idx, router_def)
+        if insert_idx != -1:
+            new_body.insert(insert_idx, router_def)
         else:
             new_body.append(router_def)
 
+    new_module = module.with_changes(body=new_body)
+
     # 4. Insert the add_conditional_edges call
-    # Place it after other conditional edges or after standard edges
-    last_cond_idx = -1
-    last_edge_idx = -1
+    inserter = GraphCallInserter(cond_stmt, graph_var, "add_conditional_edges")
+    final_module = new_module.visit(inserter)
     
-    # Re-evaluate body as it might have changed
-    for i, stmt in enumerate(new_body):
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_conditional_edges"))))])):
-            last_cond_idx = i
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name("builder"), attr=m.Name("add_edge"))))])):
-            last_edge_idx = i
+    if not inserter.inserted:
+        # Fallback to appending
+        final_body = list(final_module.body)
+        final_body.append(cond_stmt)
+        final_module = final_module.with_changes(body=final_body)
 
-    if last_cond_idx != -1:
-        new_body.insert(last_cond_idx + 1, cond_stmt)
-    elif last_edge_idx != -1:
-        new_body.insert(last_edge_idx + 1, cond_stmt)
-    else:
-        # Fallback: after builder initialization
-        builder_assign_idx = -1
-        for i, stmt in enumerate(new_body):
-            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name("builder"))])])):
-                builder_assign_idx = i
-        
-        if builder_assign_idx != -1:
-             new_body.insert(builder_assign_idx + 1, cond_stmt)
-        else:
-            new_body.append(cond_stmt)
-
-    return module.with_changes(body=new_body).code
+    return final_module.code
 
 if __name__ == "__main__":
     import os
