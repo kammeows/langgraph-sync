@@ -56,12 +56,28 @@ def parse_code_to_graph(source_code: str):
         module.visit(tool_visitor)
 
         flow_data = transform_to_react_flow(analyzer, tool_visitor)
-        # Include source code in the response
         flow_data["code"] = source_code
         return flow_data
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=422, detail=f"Failed to parse code: {str(e)}")
+        # Return a "Broken State" instead of crashing. This lets the UI load.
+        return {
+            "nodes": [
+                {
+                    "id": "__start__",
+                    "type": "startNode",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"label": "START", "isEditable": False, "deletable": False}
+                }
+            ],
+            "edges": [],
+            "warnings": [{
+                "type": "error", 
+                "message": f"CRITICAL ERROR: {str(e)}. The graph cannot be parsed. Please check your Python code for syntax errors or inconsistent node names."
+            }],
+            "code": source_code,
+            "state_schema": {"name": "Error", "fields": {}}
+        }
 
 @app.post("/api/graph/sync")
 async def sync_graph(request: SyncRequest):

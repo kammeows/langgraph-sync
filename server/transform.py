@@ -49,14 +49,21 @@ def transform_to_react_flow(analyzer, tool_visitor):
         y_offset += 150
 
     # 2. Add Entry Point Edge from START
+    node_ids = {n["id"] for n in nodes}
     if analyzer.entry_point:
-        edges.append({
-            "id": f"e-__start__-{analyzer.entry_point}",
-            "source": "__start__",
-            "target": analyzer.entry_point,
-            "animated": True,
-            "style": {"stroke": "#4caf50", "strokeWidth": 3}
-        })
+        if analyzer.entry_point in node_ids:
+            edges.append({
+                "id": f"e-__start__-{analyzer.entry_point}",
+                "source": "__start__",
+                "target": analyzer.entry_point,
+                "animated": True,
+                "style": {"stroke": "#4caf50", "strokeWidth": 3}
+            })
+        else:
+            warnings.append({
+                "type": "error",
+                "message": f"Entry point references unknown node '{analyzer.entry_point}'."
+            })
     else:
         warnings.append({
             "type": "error",
@@ -64,6 +71,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
         })
 
     # 3. Process Sub-Tool Nodes
+    # ... (rest of sub-tool logic remains same, but we use node_ids to validate matches)
     sub_tool_y = 100
     processed_subtools = set()
 
@@ -90,6 +98,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         }
                     })
                     processed_subtools.add(called)
+                    node_ids.add(called) # Update node_ids
                     sub_tool_y += 100
                 
                 edges.append({
@@ -101,6 +110,11 @@ def transform_to_react_flow(analyzer, tool_visitor):
 
     # 4. Process Standard Edges (including virtual END)
     for src, dst in analyzer.edges:
+        # Check source and target validity
+        if src not in node_ids:
+            warnings.append({"type": "error", "message": f"Edge references unknown source node '{src}'."})
+            continue
+
         target_id = dst
         if dst == "__end__":
              # Add END node only if an edge points to it
@@ -112,7 +126,11 @@ def transform_to_react_flow(analyzer, tool_visitor):
                      "position": {"x": 400, "y": y_offset},
                      "data": {"label": "END", "isEditable": False, "deletable": True}
                  })
+                 node_ids.add(end_node_id)
              target_id = "__end__"
+        elif dst not in node_ids:
+            warnings.append({"type": "error", "message": f"Edge from '{src}' references unknown target node '{dst}'."})
+            continue
              
         edges.append({
             "id": f"e-{src}-{target_id}",
@@ -127,6 +145,10 @@ def transform_to_react_flow(analyzer, tool_visitor):
         router_fn = cond["router"]
         mapping = cond["mapping"]
         
+        if source not in node_ids:
+            warnings.append({"type": "error", "message": f"Conditional edge references unknown source node '{source}'."})
+            continue
+
         # Validation: check if router function returns values not in mapping
         if router_fn in analyzer.function_returns:
             returns = analyzer.function_returns[router_fn]
@@ -148,7 +170,11 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         "position": {"x": 400, "y": y_offset},
                         "data": {"label": "END", "isEditable": False, "deletable": True}
                     })
+                    node_ids.add(end_node_id)
                 target_id = "__end__"
+            elif target not in node_ids:
+                warnings.append({"type": "error", "message": f"Conditional edge from '{source}' for key '{label}' references unknown node '{target}'."})
+                continue
                 
             edges.append({
                 "id": f"e-{source}-{target_id}-cond-{label}",
@@ -163,11 +189,15 @@ def transform_to_react_flow(analyzer, tool_visitor):
     state_keys = set(analyzer.state_schema.keys())
     
     # Pre-calculate adjacency for cycle detection and edge listing
-    adj = {n["id"]: [] for n in nodes}
+    # Safely handle node_ids
+    adj = {nid: [] for nid in node_ids}
     for e in edges:
-        adj[e["source"]].append(e["target"])
+        # Extra safety check
+        if e["source"] in adj and e["target"] in node_ids:
+            adj[e["source"]].append(e["target"])
 
     def find_cycle(start_node):
+        if start_node not in adj: return None
         # Simple DFS to find a cycle containing start_node
         stack = [(start_node, [start_node])]
         visited = set()
@@ -188,8 +218,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
         if node["type"] == "subToolNode": continue
         
         # 1. Edge connectivity validation & metadata
-        incoming = [e["source"] for e in edges if e["target"] == node_id]
-        outgoing = [e["target"] for e in edges if e["source"] == node_id]
+        incoming = [e["source"] for e in edges if e.get("target") == node_id]
+        outgoing = [e["target"] for e in edges if e.get("source") == node_id]
         cycle_path = find_cycle(node_id)
         
         node["data"]["incoming"] = incoming
@@ -210,7 +240,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 if state_keys and uk not in state_keys:
                     warnings.append({
                         "type": "error",
-                        "message": f"Node '{node_id}' returns key '{uk}', which is not defined in state schema '{analyzer.state_class_name}'."
+                        "message": f"Node '{node_id}' returns key '{uk}', which is not defined in state schema '{analyzer.state_class_name or 'AgentState'}'."
                     })
 
     return {
