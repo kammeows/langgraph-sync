@@ -5,7 +5,7 @@ from libcst import matchers as m
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
-    def __init__(self):
+    def __init__(self, target_var: str = None):
         super().__init__()
         self.functions = []
         self.function_lines = {}
@@ -19,14 +19,36 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self._current_function = None
-        self.graph_var_names = set() # Changed from {"builder"} to set() to avoid random choice
+        self.target_var = target_var
+        self.graph_var_names = set()
+        self._potential_builders = set()
 
     def visit_Assign(self, node: cst.Assign):
-        # Look for: workflow = StateGraph(AgentState)
+        # Look for: builder = StateGraph(AgentState)
         if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
             for target in node.targets:
                 if isinstance(target.target, cst.Name):
-                    self.graph_var_names.add(target.target.value)
+                    var_name = target.target.value
+                    self._potential_builders.add(var_name)
+                    # Always track builders so we can collect their nodes/edges as we encounter them
+                    self.graph_var_names.add(var_name)
+                        
+        # Look for: graph = builder.compile()
+        elif self.target_var and isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute):
+            if node.value.func.attr.value == "compile":
+                if isinstance(node.value.func.value, cst.Name):
+                    builder_name = node.value.func.value.value
+                    for target in node.targets:
+                        if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
+                            # This confirms builder_name is the one mapped to target_var
+                            # (Currently we just collect all, but this helps verify)
+                            pass
+
+    def leave_Module(self, original_node: cst.Module):
+        # Fallback: if target_var was specified but we couldn't find graph = builder.compile()
+        # just use all potential builders found.
+        if self.target_var and not self.graph_var_names and self._potential_builders:
+            self.graph_var_names.update(self._potential_builders)
 
     # ----------------------------------
     # Collect all function defs
@@ -274,8 +296,7 @@ class EnsureStartImportTransformer(cst.CSTTransformer):
         # Check if importing from langgraph.graph
         is_langgraph_graph = False
         if isinstance(updated_node.module, cst.Name) and updated_node.module.value == "graph":
-            # This might just be 'graph', not robust but okay
-            pass
+            is_langgraph_graph = True
         elif isinstance(updated_node.module, cst.Attribute) and isinstance(updated_node.module.value, cst.Name) and updated_node.module.value.value == "langgraph" and updated_node.module.attr.value == "graph":
             is_langgraph_graph = True
 
@@ -287,15 +308,25 @@ class EnsureStartImportTransformer(cst.CSTTransformer):
             if not self.found and not self.import_inserted:
                 # Add START to the existing import
                 new_names = list(updated_node.names)
-                # Add a comma separator for the previous last element if needed, though LibCST usually handles simple appends or we just replace the whole statement
-                # To be safe with LibCST formatting, it's easier to just append a new import statement at the top if START is completely missing
-                pass
+                
+                # We add an ImportAlias for START
+                new_alias = cst.ImportAlias(name=cst.Name("START"))
+                
+                # Check if we need to add a comma to the previous last element
+                if new_names:
+                    last_name = new_names[-1]
+                    new_names[-1] = last_name.with_changes(comma=cst.Comma(whitespace_after=cst.SimpleWhitespace(" ")))
+                
+                new_names.append(new_alias)
+                self.import_inserted = True
+                self.found = True # Mark as found since we just inserted it
+                return updated_node.with_changes(names=new_names)
 
         return updated_node
 
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module):
         if not self.found and not self.import_inserted:
-            # We need to add `from langgraph.graph import START`
+            # We need to add `from langgraph.graph import START` entirely
             new_import = cst.parse_statement("from langgraph.graph import START\n")
             new_body = list(updated_node.body)
             

@@ -78,7 +78,21 @@ function App() {
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
+  const [graphsList, setGraphsList] = useState([]);
+  const [selectedGraphId, setSelectedGraphId] = useState("");
   const editorRef = useRef(null);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/api/graphs")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.length > 0) {
+          setGraphsList(data);
+          setSelectedGraphId(data[0].id);
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -342,6 +356,7 @@ function App() {
             action: "add_edge",
             source: params.source,
             target: params.target,
+            graph_id: selectedGraphId,
           }),
         });
         if (response.ok) {
@@ -353,7 +368,7 @@ function App() {
         console.error("Connect failed:", error);
       }
     },
-    [nodes, processGraphStateInternal, setCode],
+    [nodes, processGraphStateInternal, setCode, selectedGraphId],
   );
 
   const addNode = useCallback(async () => {
@@ -367,7 +382,7 @@ function App() {
       const response = await fetch("http://localhost:8000/api/graph/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_node", new_id: validName }),
+        body: JSON.stringify({ action: "add_node", new_id: validName, graph_id: selectedGraphId }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -377,14 +392,14 @@ function App() {
     } catch (error) {
       console.error("Add node failed:", error);
     }
-  }, [processGraphStateInternal, setCode]);
+  }, [processGraphStateInternal, setCode, selectedGraphId]);
 
   const onAddConditionalEdge = useCallback(async (payload) => {
     try {
       const response = await fetch("http://localhost:8000/api/graph/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_conditional_edge", payload }),
+        body: JSON.stringify({ action: "add_conditional_edge", payload, graph_id: selectedGraphId }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -394,7 +409,7 @@ function App() {
     } catch (error) {
       console.error("Add conditional edge failed:", error);
     }
-  }, [processGraphStateInternal, setCode]);
+  }, [processGraphStateInternal, setCode, selectedGraphId]);
 
   // Keep the handlers ref updated
   useEffect(() => {
@@ -406,15 +421,16 @@ function App() {
     };
   }, [onRenameNode, onDeleteNode, onDeleteEdge, onRenameEdgeLabel]);
 
-  // Initial load
+  // Fetch graph whenever selectedGraphId changes
   useEffect(() => {
-    fetch("http://localhost:8000/api/graph")
+    if (!selectedGraphId) return;
+    fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.code !== undefined) setCode(data.code);
         processGraphStateInternal(data);
       });
-  }, [processGraphStateInternal, setCode]);
+  }, [selectedGraphId, processGraphStateInternal, setCode]);
 
   const syncTimerRef = useRef(null);
   const handleEditorChange = (value) => {
@@ -425,7 +441,7 @@ function App() {
         const response = await fetch("http://localhost:8000/api/graph/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: value }),
+          body: JSON.stringify({ code: value, graph_id: selectedGraphId }),
         });
         if (response.ok) {
           const data = await response.json();
@@ -455,6 +471,18 @@ function App() {
           </div>
         )}
         <div className="controls-container">
+          {graphsList.length > 0 && (
+            <select 
+              value={selectedGraphId} 
+              onChange={(e) => setSelectedGraphId(e.target.value)}
+              className="graph-selector"
+              style={{ padding: "6px", borderRadius: "4px", marginRight: "10px", backgroundColor: "#2d2d2d", color: "white", border: "1px solid #444" }}
+            >
+              {graphsList.map(g => (
+                <option key={g.id} value={g.id}>{g.id} ({g.file})</option>
+              ))}
+            </select>
+          )}
           <button className="add-node-btn" onClick={addNode}>
             + Add Node
           </button>
