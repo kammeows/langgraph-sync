@@ -266,11 +266,6 @@ builder.add_conditional_edges(
     },
 )
 
-# builder.add_conditional_edges(
-#     "router",
-#     route_after_router
-# )
-
 builder.add_edge("researcher", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
