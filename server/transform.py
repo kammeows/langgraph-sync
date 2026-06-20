@@ -70,43 +70,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
             "message": "START node does not have an entry point edge. Use builder.set_entry_point()."
         })
 
-    # 3. Process Sub-Tool Nodes
-    # ... (rest of sub-tool logic remains same, but we use node_ids to validate matches)
-    sub_tool_y = 100
-    processed_subtools = set()
-
-    for agent_func, called_funcs in tool_visitor.calls.items():
-        if agent_func not in agent_functions: continue
-        matches = [nid for nid, fname in node_to_function.items() if fname == agent_func]
-        if not matches: continue
-        agent_node_id = matches[0]
-        
-        for called in called_funcs:
-            if called in analyzer.functions and called not in agent_functions:
-                if called not in processed_subtools:
-                    sub_line_info = analyzer.function_lines.get(called)
-                    nodes.append({
-                        "id": called,
-                        "type": "subToolNode",
-                        "position": {"x": 600, "y": sub_tool_y},
-                        "data": {
-                            "label": called,
-                            "functionName": called,
-                            "lines": sub_line_info,
-                            "isEditable": False,
-                            "deletable": True
-                        }
-                    })
-                    processed_subtools.add(called)
-                    node_ids.add(called) # Update node_ids
-                    sub_tool_y += 100
-                
-                edges.append({
-                    "id": f"e-{agent_node_id}-{called}",
-                    "source": agent_node_id,
-                    "target": called,
-                    "animated": True
-                })
+    # 3. Process Sub-Tool Nodes (Omitted to align with explicit LangGraph nodes)
+    pass
 
     # 4. Process Standard Edges (including virtual END)
     for src, dst in analyzer.edges:
