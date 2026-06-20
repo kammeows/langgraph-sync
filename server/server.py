@@ -21,6 +21,8 @@ from parser_libcst import (
 )
 from transform import transform_to_react_flow
 
+import json
+
 app = FastAPI()
 
 # Enable CORS for frontend integration
@@ -31,25 +33,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-AGENT_FILE = os.path.join(os.path.dirname(__file__), "..", "agent.py")
+WORKSPACE_ROOT = os.path.join(os.path.dirname(__file__), "..")
+LANGGRAPH_JSON_PATH = os.path.join(WORKSPACE_ROOT, "langgraph.json")
+
+def get_available_graphs():
+    if os.path.exists(LANGGRAPH_JSON_PATH):
+        try:
+            with open(LANGGRAPH_JSON_PATH, "r", encoding="utf8") as f:
+                data = json.load(f)
+            graphs = data.get("graphs", {})
+            result = []
+            for g_id, path_val in graphs.items():
+                # path_val is usually "./agent.py:graph"
+                parts = path_val.split(":")
+                file_path = parts[0]
+                var_name = parts[1] if len(parts) > 1 else "graph"
+                result.append({
+                    "id": g_id,
+                    "file": file_path,
+                    "var": var_name
+                })
+            return result
+        except Exception as e:
+            print("Error parsing langgraph.json:", e)
+    
+    # Fallback to default
+    return [{"id": "default", "file": "agent.py", "var": "graph"}]
+
+def get_graph_file_path(graph_id: str):
+    graphs = get_available_graphs()
+    selected = next((g for g in graphs if g["id"] == graph_id), None)
+    if not selected:
+        selected = graphs[0]
+    
+    # Resolve relative to workspace root
+    file_path = selected["file"]
+    if file_path.startswith("./"):
+        file_path = file_path[2:]
+    return os.path.join(WORKSPACE_ROOT, file_path)
 
 class MutationRequest(BaseModel):
     action: str
+    graph_id: Optional[str] = None # Added for multi-graph
     source: Optional[str] = None
     target: Optional[str] = None
     node_id: Optional[str] = None
-    new_id: Optional[str] = None # Added for rename
+    new_id: Optional[str] = None
     payload: Optional[dict] = None
 
 class SyncRequest(BaseModel):
     code: str
+    graph_id: Optional[str] = None
 
-def parse_code_to_graph(source_code: str):
+def parse_code_to_graph(source_code: str, graph_id: Optional[str] = None):
+
     try:
         module = cst.parse_module(source_code)
         wrapper = cst.metadata.MetadataWrapper(module)
 
-        analyzer = LangGraphAnalyzer()
+        target_var = None
+        if graph_id:
+            graphs = get_available_graphs()
+            selected = next((g for g in graphs if g["id"] == graph_id), None)
+            if selected:
+                target_var = selected["var"]
+
+        analyzer = LangGraphAnalyzer(target_var=target_var)
         wrapper.visit(analyzer)
 
         tool_visitor = ToolCallVisitor()
@@ -83,23 +132,26 @@ def parse_code_to_graph(source_code: str):
 async def sync_graph(request: SyncRequest):
     """Sync graph from provided code without saving to file."""
     try:
-        return parse_code_to_graph(request.code)
+        # Pass graph_id if provided so parser knows what to look for
+        return parse_code_to_graph(request.code, request.graph_id)
     except Exception as e:
-        # If code has syntax errors, we might want to return 422 or similar
-        # but for robustness, we could just return the last known good state 
-        # (handled by frontend usually, or we can catch here)
         raise HTTPException(status_code=422, detail=f"Sync failed: {str(e)}")
 
+@app.get("/api/graphs")
+async def list_graphs():
+    return get_available_graphs()
+
 @app.get("/api/graph")
-async def get_graph():
+async def get_graph(graph_id: Optional[str] = None):
     try:
-        if not os.path.exists(AGENT_FILE):
+        file_path = get_graph_file_path(graph_id)
+        if not os.path.exists(file_path):
             return {"nodes": [], "edges": [], "code": ""}
             
-        with open(AGENT_FILE, "r", encoding="utf8") as f:
+        with open(file_path, "r", encoding="utf8") as f:
             source_code = f.read()
 
-        return parse_code_to_graph(source_code)
+        return parse_code_to_graph(source_code, graph_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -120,11 +172,19 @@ async def upload_code(file: UploadFile = File(...)):
 async def mutate_graph(request: MutationRequest):
     print(f"Mutation received: {request.action}")
     
-    if not os.path.exists(AGENT_FILE):
-         raise HTTPException(status_code=404, detail="agent.py not found")
+    file_path = get_graph_file_path(request.graph_id)
+    if not os.path.exists(file_path):
+         raise HTTPException(status_code=404, detail=f"{file_path} not found")
 
-    with open(AGENT_FILE, "r", encoding="utf8") as f:
+    with open(file_path, "r", encoding="utf8") as f:
         source_code = f.read()
+    
+    target_var = None
+    if request.graph_id:
+        graphs = get_available_graphs()
+        selected = next((g for g in graphs if g["id"] == request.graph_id), None)
+        if selected:
+            target_var = selected["var"]
     
     try:
         if request.action == "rename":
@@ -135,7 +195,7 @@ async def mutate_graph(request: MutationRequest):
 
         elif request.action == "add_node":
             module = cst.parse_module(source_code)
-            analyzer = LangGraphAnalyzer()
+            analyzer = LangGraphAnalyzer(target_var=target_var)
             cst.metadata.MetadataWrapper(module).visit(analyzer)
             existing_nodes = set(analyzer.nodes.keys())
             existing_functions = set(analyzer.functions)
@@ -163,11 +223,11 @@ async def mutate_graph(request: MutationRequest):
             else:
                 # Check for duplication first
                 module = cst.parse_module(source_code)
-                analyzer = LangGraphAnalyzer()
+                analyzer = LangGraphAnalyzer(target_var=target_var)
                 cst.metadata.MetadataWrapper(module).visit(analyzer)
                 
                 if (request.source, request.target) in analyzer.edges:
-                    return parse_code_to_graph(source_code)
+                    return parse_code_to_graph(source_code, request.graph_id)
                 
                 updated_code = add_edge_to_code(source_code, request.source, request.target)
 
@@ -194,10 +254,10 @@ async def mutate_graph(request: MutationRequest):
         else:
             return {"status": "success", "received": request.action}
 
-        with open(AGENT_FILE, "w", encoding="utf8") as f:
+        with open(file_path, "w", encoding="utf8") as f:
             f.write(updated_code)
             
-        return parse_code_to_graph(updated_code)
+        return parse_code_to_graph(updated_code, request.graph_id)
 
     except HTTPException: raise
     except Exception as e:

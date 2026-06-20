@@ -244,6 +244,10 @@ def meow(state: AgentState):
 def analysiss(state: AgentState):
     return {}
 
+
+def my_agent(state: AgentState):
+    return {}
+
 # ---------------------------------
 # Graph
 # ---------------------------------
@@ -251,17 +255,18 @@ def analysiss(state: AgentState):
 builder = StateGraph(AgentState)
 
 builder.add_node("router_v2", router_agent)
-builder.add_node("researcher", research_agent)
+builder.add_node("researcherss", research_agent)
 builder.add_node("tool", tool_agent)
 builder.add_node("analysis", analyst_agent)
 builder.add_node("report", report_agent)
+builder.add_node("my_agent", my_agent)
 builder.set_entry_point("router_v2")
 
 builder.add_conditional_edges(
     "router_v2",
     route_after_router,
     {
-        "research": "researcher",
+        "research": "researcherss",
         "tool": "tool",
     },
 )
@@ -271,10 +276,10 @@ builder.add_conditional_edges(
 #     route_after_router
 # )
 
-builder.add_edge("researcher", "tool")
+builder.add_edge("researcherss", "tool")
 builder.add_edge("tool", "analysis")
 builder.add_edge("analysis", "report")
-builder.add_edge("router_v2", "researcher")
+builder.add_edge("router_v2", "researcherss")
 builder.add_edge("report", END)
 
 graph = builder.compile()

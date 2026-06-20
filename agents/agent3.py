@@ -11,13 +11,33 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Base
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_openai import ChatOpenAI
 from langgraph.graph import MessagesState, StateGraph, END
 import os, getpass
 from dotenv import load_dotenv
 from langgraph.checkpoint.memory import MemorySaver
 import numpy as np
 
-Config = {}
+from types import SimpleNamespace
+
+config = SimpleNamespace(
+    rag=SimpleNamespace(
+        llm=None,
+        context_limit=5,
+        min_retrieval_confidence=0.5
+    ),
+    conversation=SimpleNamespace(
+        llm=None
+    ),
+    web_search=SimpleNamespace(
+        context_limit=5
+    ),
+    agent_decision=SimpleNamespace(
+        llm=None
+    ),
+    max_conversation_history=10
+)
+
 def MedicalRAG(*args, **kwargs):
     return "Dummy Resume"
 
@@ -37,9 +57,6 @@ def LocalGuardrails(*args, **kwargs):
     }
 
 load_dotenv()
-
-# Load configuration
-config = Config()
 
 # Initialize memory
 memory = MemorySaver()
@@ -120,7 +137,9 @@ def create_agent_graph():
     guardrails = LocalGuardrails(config.rag.llm)
 
     # LLM
-    decision_model = config.agent_decision.llm
+    from langchain_openai import ChatOpenAI
+
+    decision_model = ChatOpenAI(model="gpt-4o-mini")
     
     # Initialize the output parser
     json_parser = JsonOutputParser(pydantic_object=AgentDecision)
@@ -618,7 +637,7 @@ def create_agent_graph():
     workflow.add_node("BRAIN_TUMOR_AGENT", run_brain_tumor_agent)
     workflow.add_node("CHEST_XRAY_AGENT", run_chest_xray_agent)
     workflow.add_node("SKIN_LESION_AGENT", run_skin_lesion_agent)
-    workflow.add_node("check_validation", handle_human_validation)
+    workflow.add_node("check_validationnn", handle_human_validation)
     workflow.add_node("human_validation", perform_human_validation)
     workflow.add_node("apply_guardrails", apply_output_guardrails)
     
@@ -651,19 +670,19 @@ def create_agent_graph():
     )
     
     # Connect agent outputs to validation check
-    workflow.add_edge("CONVERSATION_AGENT", "check_validation")
+    workflow.add_edge("CONVERSATION_AGENT", "check_validationnn")
     # workflow.add_edge("RAG_AGENT", "check_validation")
-    workflow.add_edge("WEB_SEARCH_PROCESSOR_AGENT", "check_validation")
+    workflow.add_edge("WEB_SEARCH_PROCESSOR_AGENT", "check_validationnn")
     workflow.add_conditional_edges("RAG_AGENT", confidence_based_routing)
-    workflow.add_edge("BRAIN_TUMOR_AGENT", "check_validation")
-    workflow.add_edge("CHEST_XRAY_AGENT", "check_validation")
-    workflow.add_edge("SKIN_LESION_AGENT", "check_validation")
+    workflow.add_edge("BRAIN_TUMOR_AGENT", "check_validationnn")
+    workflow.add_edge("CHEST_XRAY_AGENT", "check_validationnn")
+    workflow.add_edge("SKIN_LESION_AGENT", "check_validationnn")
 
     workflow.add_edge("human_validation", "apply_guardrails")
     workflow.add_edge("apply_guardrails", END)
     
     workflow.add_conditional_edges(
-        "check_validation",
+        "check_validationnn",
         lambda x: x["next"],
         {
             "human_validation": "human_validation",
@@ -674,7 +693,7 @@ def create_agent_graph():
     # workflow.add_edge("human_validation", END)
     
     # Compile the graph
-    return workflow.compile(checkpointer=memory)
+    return workflow.compile()
 
 
 def init_agent_state() -> AgentState:
@@ -742,3 +761,5 @@ def process_query(query: Union[str, Dict], conversation_history: List[BaseMessag
     
     # Add the response to conversation history
     return result
+
+graph = create_agent_graph()

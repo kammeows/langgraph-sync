@@ -1,7 +1,9 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "research_team": "./agent.py:graph"
+    "research_team": "./agents/agent2.py:graph",
+    "second_team": "./agents/agent4.py:graph",
+    "third_team": "./agents/agent3.py:graph"
   },
   "env": ".env"
 }
