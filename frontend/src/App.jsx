@@ -28,7 +28,7 @@ dagreGraph.setDefaultEdgeLabel(() => ({}));
 const nodeWidth = 172;
 const nodeHeight = 36;
 
-const getLayoutedElements = (nodes, edges, direction = "TB") => {
+const getLayoutedElements = (nodes, edges, savedPositions = {}, direction = "TB") => {
   const isHorizontal = direction === "LR";
   dagreGraph.setGraph({ rankdir: direction, nodesep: 70, ranksep: 100 });
 
@@ -44,11 +44,12 @@ const getLayoutedElements = (nodes, edges, direction = "TB") => {
 
   const newNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    const saved = savedPositions[node.id];
     return {
       ...node,
       targetPosition: isHorizontal ? "left" : "top",
       sourcePosition: isHorizontal ? "right" : "bottom",
-      position: {
+      position: saved || {
         x: nodeWithPosition.x - nodeWidth / 2,
         y: nodeWithPosition.y - nodeHeight / 2,
       },
@@ -82,6 +83,7 @@ function App() {
   const [selectedGraphId, setSelectedGraphId] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
   const editorRef = useRef(null);
+  const rawGraphDataRef = useRef(null);
 
   useEffect(() => {
     fetch("http://localhost:8000/api/graphs")
@@ -226,9 +228,17 @@ function App() {
         };
       });
 
+      // Cache the raw data for resetting the layout back to defaults
+      rawGraphDataRef.current = data;
+
+      const savedPositions = selectedGraphId
+        ? (JSON.parse(localStorage.getItem(`node-positions-${selectedGraphId}`)) || {})
+        : {};
+
       const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
         nodesWithHandlers,
-        edgesWithHandlers
+        edgesWithHandlers,
+        savedPositions
       );
 
       // Ensure markerEnd is preserved or re-applied
@@ -249,7 +259,7 @@ function App() {
         setStateSchema(data.state_schema);
       }
     },
-    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels],
+    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels, selectedGraphId],
   );
 
   // 4. Backend-Calling Handlers
@@ -474,6 +484,26 @@ function App() {
     }, 800);
   };
 
+  const onNodeDragStop = useCallback((event, node) => {
+    if (!selectedGraphId) return;
+    setNodes((currentNodes) => {
+      const positions = {};
+      currentNodes.forEach((n) => {
+        positions[n.id] = n.position;
+      });
+      localStorage.setItem(`node-positions-${selectedGraphId}`, JSON.stringify(positions));
+      return currentNodes;
+    });
+  }, [selectedGraphId, setNodes]);
+
+  const handleResetLayout = useCallback(() => {
+    if (!selectedGraphId) return;
+    localStorage.removeItem(`node-positions-${selectedGraphId}`);
+    if (rawGraphDataRef.current) {
+      processGraphStateInternal(rawGraphDataRef.current);
+    }
+  }, [selectedGraphId, processGraphStateInternal]);
+
   return (
     <div className="main-container">
       <div className="graph-container">
@@ -520,6 +550,13 @@ function App() {
             onClick={() => setShowEdgeLabels(!showEdgeLabels)}
           >
             {showEdgeLabels ? "👁️ Hide Edge Labels" : "👁️ Show Edge Labels"}
+          </button>
+          <button 
+            className="add-node-btn" 
+            style={{ backgroundColor: "#e11d48" }}
+            onClick={handleResetLayout}
+          >
+            🔄 Reset Layout
           </button>
           <button
             className="add-node-btn"
@@ -587,6 +624,7 @@ function App() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
