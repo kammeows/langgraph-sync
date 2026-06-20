@@ -247,10 +247,20 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                 val = None
                                 if isinstance(elt.key, cst.SimpleString):
                                     key = elt.key.evaluated_value
+                                elif isinstance(elt.key, cst.Name):
+                                    if elt.key.value == "END":
+                                        key = "__end__"
+                                    else:
+                                        key = elt.key.value
+
                                 if isinstance(elt.value, cst.SimpleString):
                                     val = elt.value.evaluated_value
-                                elif isinstance(elt.value, cst.Name) and elt.value.value == "END":
-                                    val = "__end__"
+                                elif isinstance(elt.value, cst.Name):
+                                    if elt.value.value == "END":
+                                        val = "__end__"
+                                    else:
+                                        val = elt.value.value
+                                
                                 if key and val:
                                     mapping[key] = val
 
