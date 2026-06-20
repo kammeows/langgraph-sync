@@ -262,6 +262,7 @@ function App() {
             action: "rename",
             node_id: id,
             new_id: newLabel,
+            graph_id: selectedGraphId,
           }),
         });
         if (response.ok) {
@@ -273,7 +274,7 @@ function App() {
         console.error("Rename failed:", error);
       }
     },
-    [processGraphStateInternal, setCode],
+    [processGraphStateInternal, setCode, selectedGraphId],
   );
 
   const onDeleteNode = useCallback(
@@ -284,7 +285,11 @@ function App() {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "delete_node", node_id: id }),
+          body: JSON.stringify({
+            action: "delete_node",
+            node_id: id,
+            graph_id: selectedGraphId,
+          }),
         });
         if (response.ok) {
           const data = await response.json();
@@ -295,7 +300,7 @@ function App() {
         console.error("Delete node failed:", error);
       }
     },
-    [processGraphStateInternal, setCode],
+    [processGraphStateInternal, setCode, selectedGraphId],
   );
 
   const onDeleteEdge = useCallback(
@@ -312,6 +317,7 @@ function App() {
             source: edge.source,
             target: edge.target,
             payload: { condition: edge.data?.condition },
+            graph_id: selectedGraphId,
           }),
         });
         if (response.ok) {
@@ -323,7 +329,7 @@ function App() {
         console.error("Delete edge failed:", error);
       }
     },
-    [edges, processGraphStateInternal, setCode],
+    [edges, processGraphStateInternal, setCode, selectedGraphId],
   );
 
   const onConnect = useCallback(
