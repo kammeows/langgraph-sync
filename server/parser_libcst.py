@@ -18,6 +18,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.entry_point = None
         self.state_class_name = None
         self.state_schema = {} 
+        self.class_schemas = {}
         self._current_function = None
         self.target_var = target_var
         self.graph_var_names = set()
@@ -49,6 +50,22 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         # just use all potential builders found.
         if self.target_var and not self.graph_var_names and self._potential_builders:
             self.graph_var_names.update(self._potential_builders)
+
+        # Finalize the state schema selection based on the compiled graph state class if known,
+        # otherwise fallback to classes with "State" in their name or the first available class schema.
+        if self.state_class_name and self.state_class_name in self.class_schemas:
+            self.state_schema = self.class_schemas[self.state_class_name]
+        else:
+            state_classes = [name for name in self.class_schemas.keys() if "State" in name]
+            if state_classes:
+                if "AgentState" in state_classes:
+                    self.state_class_name = "AgentState"
+                else:
+                    self.state_class_name = state_classes[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
+            elif self.class_schemas:
+                self.state_class_name = list(self.class_schemas.keys())[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
 
     # ----------------------------------
     # Collect all function defs
@@ -103,41 +120,31 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
     def visit_ClassDef(self, node: cst.ClassDef):
         class_name = node.name.value
-        # Check if it inherits from TypedDict, MessagesState, or if it has 'State' in the name
-        is_state_class = any(
-            isinstance(base.value, cst.Name) and base.value.value in ["TypedDict", "MessagesState"]
-            for base in node.bases
-        ) or "State" in class_name
         
-        # If it's a state class, parse it.
-        # We will keep the schema of the last state class found if multiple,
-        # or exactly the one that matches self.state_class_name if it was already found.
-        if is_state_class or (self.state_class_name and class_name == self.state_class_name):
-            schema = {}
-            for item in node.body.body:
-                if isinstance(item, cst.SimpleStatementLine):
-                    for part in item.body:
-                        if isinstance(part, cst.AnnAssign) and isinstance(part.target, cst.Name):
-                            key = part.target.value
-                            anno = "any"
-                            if isinstance(part.annotation.annotation, cst.Name):
-                                anno = part.annotation.annotation.value
-                            elif isinstance(part.annotation.annotation, cst.Subscript):
-                                # Extract string representation of Subscript
-                                try:
-                                    anno = cst.parse_module("").code_for_node(part.annotation.annotation)
-                                except Exception:
-                                    anno = "complex_type"
-                            schema[key] = anno
-            
-            # If it's MessagesState, it implicitly has 'messages'
-            if any(isinstance(base.value, cst.Name) and base.value.value == "MessagesState" for base in node.bases):
-                if "messages" not in schema:
-                    schema["messages"] = "list"
+        # Parse fields for any class we encounter.
+        schema = {}
+        for item in node.body.body:
+            if isinstance(item, cst.SimpleStatementLine):
+                for part in item.body:
+                    if isinstance(part, cst.AnnAssign) and isinstance(part.target, cst.Name):
+                        key = part.target.value
+                        anno = "any"
+                        if isinstance(part.annotation.annotation, cst.Name):
+                            anno = part.annotation.annotation.value
+                        elif isinstance(part.annotation.annotation, cst.Subscript):
+                            # Extract string representation of Subscript
+                            try:
+                                anno = cst.parse_module("").code_for_node(part.annotation.annotation)
+                            except Exception:
+                                anno = "complex_type"
+                        schema[key] = anno
+        
+        # If it's MessagesState, it implicitly has 'messages'
+        if any(isinstance(base.value, cst.Name) and base.value.value == "MessagesState" for base in node.bases):
+            if "messages" not in schema:
+                schema["messages"] = "list"
 
-            self.state_schema = schema
-            if not self.state_class_name:
-                self.state_class_name = class_name
+        self.class_schemas[class_name] = schema
 
     def visit_Call(self, node: cst.Call):
         # Detect state.get("key")

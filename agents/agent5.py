@@ -1,6 +1,6 @@
 from typing import List, TypedDict, Annotated
 from langchain_core.messages import AIMessage
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
@@ -12,11 +12,12 @@ import os
 load_dotenv()
 
 # Configure LLM
-llm = ChatGroq(
-    temperature=0.1,
-    model_name="mixtral-8x7b-32768",
-    groq_api_key=os.getenv("GROQ_API_KEY")
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
 )
+
 # Define State and Graph
 class CodeState(TypedDict):
     messages: Annotated[list, add_messages]
