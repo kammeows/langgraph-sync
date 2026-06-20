@@ -43,10 +43,10 @@ export default function SelfLoopEdge({
           style={{
             position: "absolute",
             transform: `translate(-50%, -50%) translate(${sourceX + nodeWidth/2 + loopWidth}px,${(sourceY + targetY)/2}px)`,
-            background: "#1e1e1e",
+            background: data?.showLabels ? "#1e1e1e" : "transparent",
             color: "#8b5cf6",
-            padding: "2px 6px",
-            border: "1px solid #444",
+            padding: data?.showLabels ? "2px 6px" : "0",
+            border: data?.showLabels ? "1px solid #444" : "none",
             borderRadius: "4px",
             fontSize: "10px",
             fontWeight: "bold",
@@ -54,7 +54,7 @@ export default function SelfLoopEdge({
           }}
           className="nodrag nopan"
         >
-          {data?.label || "self"}
+          {data?.showLabels && (data?.label || "self")}
           <button 
             onClick={(e) => {
                 e.stopPropagation();

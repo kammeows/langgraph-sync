@@ -46,20 +46,12 @@ const DeletableEdge = ({
       finalLabelY = (sourceY + targetY) / 2;
   }
 
-  const [label, setLabel] = useState(data?.label || '');
-  const [isEditing, setIsEditing] = useState(false);
+  const label = data?.label || '';
 
   const onEdgeClick = (evt) => {
     evt.stopPropagation();
     if (data && data.onDelete) {
       data.onDelete(id);
-    }
-  };
-
-  const onLabelChange = (evt) => {
-    setLabel(evt.target.value);
-    if (data?.onRenameLabel) {
-      data.onRenameLabel(id, evt.target.value);
     }
   };
 
@@ -134,25 +126,11 @@ const DeletableEdge = ({
               />
           )}
 
-          {data?.isConditional && (
+          {data?.showLabels && data?.isConditional && (
             <div className="edge-label-container">
-              {isEditing ? (
-                <input
-                  className="edge-label-input"
-                  type="text"
-                  value={label}
-                  onChange={onLabelChange}
-                  onBlur={() => setIsEditing(false)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') setIsEditing(false);
-                  }}
-                  autoFocus
-                />
-              ) : (
-                <div className="edge-label" onDoubleClick={() => setIsEditing(true)}>
-                  {label || 'Conditional Edge'}
-                </div>
-              )}
+              <div className="edge-label">
+                {label || 'Conditional Edge'}
+              </div>
             </div>
           )}
           <button className="delete-edge-btn" onClick={onEdgeClick}>

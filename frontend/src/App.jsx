@@ -80,6 +80,7 @@ function App() {
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
   const [graphsList, setGraphsList] = useState([]);
   const [selectedGraphId, setSelectedGraphId] = useState("");
+  const [showEdgeLabels, setShowEdgeLabels] = useState(true);
   const editorRef = useRef(null);
 
   useEffect(() => {
@@ -220,6 +221,7 @@ function App() {
             },
             onRenameLabel: onRenameEdgeLabel,
             onUpdateData: onUpdateEdgeData,
+            showLabels: showEdgeLabels,
           },
         };
       });
@@ -247,7 +249,7 @@ function App() {
         setStateSchema(data.state_schema);
       }
     },
-    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema],
+    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels],
   );
 
   // 4. Backend-Calling Handlers
@@ -438,6 +440,19 @@ function App() {
       });
   }, [selectedGraphId, processGraphStateInternal, setCode]);
 
+  // Sync edge labels visibility state to all edge data objects
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((edge) => ({
+        ...edge,
+        data: {
+          ...edge.data,
+          showLabels: showEdgeLabels,
+        },
+      }))
+    );
+  }, [showEdgeLabels, setEdges]);
+
   const syncTimerRef = useRef(null);
   const handleEditorChange = (value) => {
     setCode(value);
@@ -498,6 +513,13 @@ function App() {
             onClick={() => setIsCondModalOpen(true)}
           >
             + Add Conditional Route
+          </button>
+          <button 
+            className="add-node-btn" 
+            style={{ backgroundColor: showEdgeLabels ? "#10b981" : "#4b5563" }}
+            onClick={() => setShowEdgeLabels(!showEdgeLabels)}
+          >
+            {showEdgeLabels ? "👁️ Hide Edge Labels" : "👁️ Show Edge Labels"}
           </button>
           <button
             className="add-node-btn"
