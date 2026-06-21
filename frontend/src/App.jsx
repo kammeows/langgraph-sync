@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -6,8 +6,8 @@ import {
   Background,
   useNodesState,
   useEdgesState,
-  addEdge,
   MarkerType,
+  useReactFlow,
 } from "@xyflow/react";
 import Editor from "@monaco-editor/react";
 
@@ -85,30 +85,33 @@ function App() {
   const editorRef = useRef(null);
   const rawGraphDataRef = useRef(null);
 
+  const { getViewport, setViewport, fitView } = useReactFlow();
+  const restoredGraphIdRef = useRef(null);
+  const highlightedGraphIdRef = useRef(null);
+
   useEffect(() => {
     fetch("http://localhost:8000/api/graphs")
       .then((res) => res.json())
       .then((data) => {
         if (data && data.length > 0) {
           setGraphsList(data);
-          setSelectedGraphId(data[0].id);
+          const savedGraphId = localStorage.getItem("selected-graph-id");
+          const hasSavedGraph = savedGraphId && data.some(g => g.id === savedGraphId);
+          setSelectedGraphId(hasSavedGraph ? savedGraphId : data[0].id);
         }
       })
       .catch(console.error);
   }, []);
 
-  const handleEditorDidMount = (editor, monaco) => {
-    editorRef.current = editor;
-  };
-
-  const onNodeClick = useCallback(
-    (event, node) => {
-      console.log("Node clicked data:", node.data);
-      if (node.data && node.data.lines && editorRef.current) {
+  const selectLinesInEditor = useCallback(
+    (node) => {
+      if (!node || !editorRef.current) return;
+      if (node.data && node.data.lines) {
         const [startLine, endLine] = node.data.lines;
         console.log(`Highlighting lines ${startLine} to ${endLine}`);
         editorRef.current.revealLineInCenter(startLine);
         const model = editorRef.current.getModel();
+        if (!model) return;
         const maxColumn = model.getLineMaxColumn(endLine);
         editorRef.current.setSelection({
           startLineNumber: startLine,
@@ -116,9 +119,9 @@ function App() {
           endLineNumber: endLine,
           endColumn: maxColumn,
         });
-        if (isEditorCollapsed) setIsEditorCollapsed(false);
-      } else if (node.data && node.data.functionName && editorRef.current) {
+      } else if (node.data && node.data.functionName) {
         const model = editorRef.current.getModel();
+        if (!model) return;
         const matches = model.findMatches(
           `def ${node.data.functionName}`,
           true,
@@ -131,11 +134,30 @@ function App() {
           const match = matches[0];
           editorRef.current.revealLineInCenter(match.range.startLineNumber);
           editorRef.current.setSelection(match.range);
-          if (isEditorCollapsed) setIsEditorCollapsed(false);
         }
       }
     },
-    [isEditorCollapsed],
+    [],
+  );
+
+  const handleEditorDidMount = (editor) => {
+    editorRef.current = editor;
+    if (selectedGraphId && nodes.length > 0) {
+      const selectedNode = nodes.find(n => n.selected);
+      if (selectedNode) {
+        selectLinesInEditor(selectedNode);
+        highlightedGraphIdRef.current = selectedGraphId;
+      }
+    }
+  };
+
+  const onNodeClick = useCallback(
+    (event, node) => {
+      console.log("Node clicked data:", node.data);
+      selectLinesInEditor(node);
+      if (isEditorCollapsed) setIsEditorCollapsed(false);
+    },
+    [selectLinesInEditor, isEditorCollapsed],
   );
 
   // 1. Handlers Reference to break circularity
@@ -241,6 +263,15 @@ function App() {
         savedPositions
       );
 
+      const savedSelectedNodeId = selectedGraphId
+        ? localStorage.getItem(`selected-node-${selectedGraphId}`)
+        : null;
+
+      const finalNodes = layoutedNodes.map((node) => ({
+        ...node,
+        selected: node.id === savedSelectedNodeId,
+      }));
+
       // Ensure markerEnd is preserved or re-applied
       const finalEdges = layoutedEdges.map(e => ({
           ...e,
@@ -250,7 +281,7 @@ function App() {
           }
       }));
 
-      setNodes(layoutedNodes);
+      setNodes(finalNodes);
       setEdges(finalEdges);
       if (data.warnings) {
         setWarnings(data.warnings);
@@ -259,7 +290,7 @@ function App() {
         setStateSchema(data.state_schema);
       }
     },
-    [onRenameEdgeLabel, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels, selectedGraphId],
+    [onRenameEdgeLabel, onUpdateEdgeData, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels, selectedGraphId],
   );
 
   // 4. Backend-Calling Handlers
@@ -442,6 +473,12 @@ function App() {
   // Fetch graph whenever selectedGraphId changes
   useEffect(() => {
     if (!selectedGraphId) return;
+    localStorage.setItem("selected-graph-id", selectedGraphId);
+    
+    // Reset viewport and highlight restoration flags for the new graph
+    restoredGraphIdRef.current = null;
+    highlightedGraphIdRef.current = null;
+
     fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
       .then((res) => res.json())
       .then((data) => {
@@ -449,6 +486,42 @@ function App() {
         processGraphStateInternal(data);
       });
   }, [selectedGraphId, processGraphStateInternal, setCode]);
+
+  // Restore viewport when graph is loaded and nodes are available
+  useEffect(() => {
+    if (!selectedGraphId || nodes.length === 0) return;
+    if (restoredGraphIdRef.current === selectedGraphId) return;
+
+    restoredGraphIdRef.current = selectedGraphId;
+
+    const savedViewport = localStorage.getItem(`viewport-${selectedGraphId}`);
+    if (savedViewport) {
+      try {
+        const parsed = JSON.parse(savedViewport);
+        setTimeout(() => {
+          setViewport(parsed);
+        }, 0);
+      } catch (e) {
+        console.error("Failed to restore viewport", e);
+      }
+    } else {
+      setTimeout(() => {
+        fitView({ padding: 0.2 });
+      }, 0);
+    }
+  }, [selectedGraphId, nodes, setViewport, fitView]);
+
+  // Auto-highlight selected node in editor on graph change / editor mount
+  useEffect(() => {
+    if (!editorRef.current || !selectedGraphId || nodes.length === 0) return;
+    if (highlightedGraphIdRef.current === selectedGraphId) return;
+
+    const selectedNode = nodes.find(n => n.selected);
+    if (selectedNode) {
+      selectLinesInEditor(selectedNode);
+    }
+    highlightedGraphIdRef.current = selectedGraphId;
+  }, [selectedGraphId, nodes, selectLinesInEditor]);
 
   // Sync edge labels visibility state to all edge data objects
   useEffect(() => {
@@ -484,7 +557,27 @@ function App() {
     }, 800);
   };
 
-  const onNodeDragStop = useCallback((event, node) => {
+  const onSelectionChange = useCallback(({ nodes: selectedNodes }) => {
+    if (!selectedGraphId) return;
+    const selectedNode = selectedNodes.find(n => n.selected);
+    if (selectedNode) {
+      localStorage.setItem(`selected-node-${selectedGraphId}`, selectedNode.id);
+    } else {
+      localStorage.removeItem(`selected-node-${selectedGraphId}`);
+    }
+  }, [selectedGraphId]);
+
+  const onMoveEnd = useCallback(() => {
+    if (!selectedGraphId) return;
+    try {
+      const viewport = getViewport();
+      localStorage.setItem(`viewport-${selectedGraphId}`, JSON.stringify(viewport));
+    } catch (e) {
+      console.error("Error getting viewport:", e);
+    }
+  }, [selectedGraphId, getViewport]);
+
+  const onNodeDragStop = useCallback(() => {
     if (!selectedGraphId) return;
     setNodes((currentNodes) => {
       const positions = {};
@@ -499,10 +592,21 @@ function App() {
   const handleResetLayout = useCallback(() => {
     if (!selectedGraphId) return;
     localStorage.removeItem(`node-positions-${selectedGraphId}`);
+    localStorage.removeItem(`selected-node-${selectedGraphId}`);
+    localStorage.removeItem(`viewport-${selectedGraphId}`);
+
+    // Clear selection state in nodes
+    setNodes((nds) => nds.map(n => ({ ...n, selected: false })));
+
     if (rawGraphDataRef.current) {
       processGraphStateInternal(rawGraphDataRef.current);
     }
-  }, [selectedGraphId, processGraphStateInternal]);
+
+    // Reset viewport to default (fitView)
+    setTimeout(() => {
+      fitView({ padding: 0.2 });
+    }, 0);
+  }, [selectedGraphId, processGraphStateInternal, setNodes, fitView]);
 
   return (
     <div className="main-container">
@@ -625,9 +729,11 @@ function App() {
           onConnect={onConnect}
           onNodeClick={onNodeClick}
           onNodeDragStop={onNodeDragStop}
+          onSelectionChange={onSelectionChange}
+          onMoveEnd={onMoveEnd}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView
+          fitView={false}
         >
           <Controls />
           <MiniMap />
