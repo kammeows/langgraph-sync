@@ -375,14 +375,29 @@ You must respond in JSON format with the following keys:
             "graph": graph_data
         }
 
-    if result.get("rejected") or not result.get("mutations"):
+    # 5. Parse response format dynamically
+    if isinstance(result, list):
+        mutations = result
+        rejected = False
+        message = "I have successfully applied the requested structural mutations to your graph."
+    elif isinstance(result, dict):
+        rejected = result.get("rejected", False)
+        message = result.get("message", "")
+        mutations = result.get("mutations", [])
+        # In case the model wrapped mutations in a dictionary but didn't set them as a list
+        if not isinstance(mutations, list):
+            mutations = []
+    else:
+        rejected = True
+        message = "Unexpected response format from AI service."
+        mutations = []
+
+    if rejected or not mutations:
         return {
             "success": False,
-            "message": result.get("message", "I cannot perform that request as it does not involve a structural graph mutation."),
+            "message": message or "I cannot perform that request as it does not involve a structural graph mutation.",
             "graph": graph_data
         }
-
-    mutations = result["mutations"]
     
     try:
         target_var = None
