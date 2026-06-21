@@ -3,8 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import libcst as cst
 import os
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import traceback
+import json
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 # Import our parser and transformer
 from parser_libcst import (
@@ -21,8 +25,6 @@ from parser_libcst import (
 )
 from transform import transform_to_react_flow
 
-import json
-
 app = FastAPI()
 
 # Enable CORS for frontend integration
@@ -34,6 +36,7 @@ app.add_middleware(
 )
 
 WORKSPACE_ROOT = os.path.join(os.path.dirname(__file__), "..")
+load_dotenv(os.path.join(WORKSPACE_ROOT, ".env"))
 LANGGRAPH_JSON_PATH = os.path.join(WORKSPACE_ROOT, "langgraph.json")
 
 def get_available_graphs():
@@ -84,6 +87,10 @@ class MutationRequest(BaseModel):
 class SyncRequest(BaseModel):
     code: str
     graph_id: Optional[str] = None
+
+class CopilotChatRequest(BaseModel):
+    query: str
+    graph_id: str
 
 def parse_code_to_graph(source_code: str, graph_id: Optional[str] = None):
 
@@ -168,6 +175,85 @@ async def upload_code(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def apply_mutation_to_source(
+    source_code: str,
+    action: str,
+    node_id: Optional[str] = None,
+    new_id: Optional[str] = None,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    payload: Optional[dict] = None,
+    target_var: Optional[str] = None
+) -> str:
+    if action == "rename":
+        module = cst.parse_module(source_code)
+        transformer = RenameNodeTransformer(node_id, new_id)
+        new_module = module.visit(transformer)
+        return new_module.code
+
+    elif action == "add_node":
+        module = cst.parse_module(source_code)
+        analyzer = LangGraphAnalyzer(target_var=target_var)
+        cst.metadata.MetadataWrapper(module).visit(analyzer)
+        existing_nodes = set(analyzer.nodes.keys())
+        existing_functions = set(analyzer.functions)
+
+        if new_id:
+            if new_id in existing_nodes or new_id in existing_functions:
+                raise HTTPException(status_code=400, detail=f"Name '{new_id}' already exists.")
+            new_node_id = new_id
+        else:
+            index = 1
+            while f"node{index}" in existing_nodes: index += 1
+            new_node_id = f"node{index}"
+        
+        return add_node_to_code(source_code, new_node_id)
+    
+    elif action == "delete_node":
+        module = cst.parse_module(source_code)
+        transformer = RemoveNodeTransformer(node_id)
+        new_module = module.visit(transformer)
+        return new_module.code
+
+    elif action == "add_edge":
+        if source == "__start__":
+            return update_entry_point_in_code(source_code, target)
+        else:
+            # Check for duplication first
+            module = cst.parse_module(source_code)
+            analyzer = LangGraphAnalyzer(target_var=target_var)
+            cst.metadata.MetadataWrapper(module).visit(analyzer)
+            
+            if (source, target) in analyzer.edges:
+                return source_code
+            
+            return add_edge_to_code(source_code, source, target)
+
+    elif action == "delete_edge":
+        module = cst.parse_module(source_code)
+        if source == "__start__":
+            transformer = RemoveEntryPointTransformer()
+        else:
+            condition = payload.get("condition") if payload else None
+            transformer = RemoveEdgeTransformer(source, target, condition=condition)
+        new_module = module.visit(transformer)
+        return new_module.code
+
+    elif action == "add_conditional_edge":
+        # payload should contain {source, router_fn, mapping}
+        if not payload:
+            raise HTTPException(status_code=400, detail="Missing payload for conditional edge.")
+        return add_conditional_edge_to_code(
+            source_code, 
+            source or payload.get("source"), 
+            payload.get("router_fn"), 
+            payload.get("mapping")
+        )
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported mutation action: {action}")
+
+
 @app.post("/api/graph/mutate")
 async def mutate_graph(request: MutationRequest):
     print(f"Mutation received: {request.action}")
@@ -187,72 +273,16 @@ async def mutate_graph(request: MutationRequest):
             target_var = selected["var"]
     
     try:
-        if request.action == "rename":
-            module = cst.parse_module(source_code)
-            transformer = RenameNodeTransformer(request.node_id, request.new_id)
-            new_module = module.visit(transformer)
-            updated_code = new_module.code
-
-        elif request.action == "add_node":
-            module = cst.parse_module(source_code)
-            analyzer = LangGraphAnalyzer(target_var=target_var)
-            cst.metadata.MetadataWrapper(module).visit(analyzer)
-            existing_nodes = set(analyzer.nodes.keys())
-            existing_functions = set(analyzer.functions)
-
-            if request.new_id:
-                if request.new_id in existing_nodes or request.new_id in existing_functions:
-                    raise HTTPException(status_code=400, detail=f"Name '{request.new_id}' already exists.")
-                new_node_id = request.new_id
-            else:
-                index = 1
-                while f"node{index}" in existing_nodes: index += 1
-                new_node_id = f"node{index}"
-            
-            updated_code = add_node_to_code(source_code, new_node_id)
-        
-        elif request.action == "delete_node":
-            module = cst.parse_module(source_code)
-            transformer = RemoveNodeTransformer(request.node_id)
-            new_module = module.visit(transformer)
-            updated_code = new_module.code
-
-        elif request.action == "add_edge":
-            if request.source == "__start__":
-                updated_code = update_entry_point_in_code(source_code, request.target)
-            else:
-                # Check for duplication first
-                module = cst.parse_module(source_code)
-                analyzer = LangGraphAnalyzer(target_var=target_var)
-                cst.metadata.MetadataWrapper(module).visit(analyzer)
-                
-                if (request.source, request.target) in analyzer.edges:
-                    return parse_code_to_graph(source_code, request.graph_id)
-                
-                updated_code = add_edge_to_code(source_code, request.source, request.target)
-
-        elif request.action == "delete_edge":
-            module = cst.parse_module(source_code)
-            if request.source == "__start__":
-                transformer = RemoveEntryPointTransformer()
-            else:
-                condition = request.payload.get("condition") if request.payload else None
-                transformer = RemoveEdgeTransformer(request.source, request.target, condition=condition)
-            new_module = module.visit(transformer)
-            updated_code = new_module.code
-
-        elif request.action == "add_conditional_edge":
-            # payload should contain {source, router_fn, mapping}
-            payload = request.payload
-            updated_code = add_conditional_edge_to_code(
-                source_code, 
-                payload["source"], 
-                payload["router_fn"], 
-                payload["mapping"]
-            )
-
-        else:
-            return {"status": "success", "received": request.action}
+        updated_code = apply_mutation_to_source(
+            source_code=source_code,
+            action=request.action,
+            node_id=request.node_id,
+            new_id=request.new_id,
+            source=request.source,
+            target=request.target,
+            payload=request.payload,
+            target_var=target_var
+        )
 
         with open(file_path, "w", encoding="utf8") as f:
             f.write(updated_code)
@@ -263,6 +293,134 @@ async def mutate_graph(request: MutationRequest):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/copilot/chat")
+async def copilot_chat(request: CopilotChatRequest):
+    print(f"Copilot request received: {request.query}")
+    
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY environment variable is not set in backend.")
+        
+    file_path = get_graph_file_path(request.graph_id)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Graph file {file_path} not found.")
+        
+    with open(file_path, "r", encoding="utf8") as f:
+        source_code = f.read()
+        
+    try:
+        # Parse graph data to get context
+        graph_data = parse_code_to_graph(source_code, request.graph_id)
+        nodes_summary = [{"id": n["id"], "type": n.get("type"), "label": n.get("data", {}).get("label")} for n in graph_data.get("nodes", [])]
+        edges_summary = [{"source": e["source"], "target": e["target"], "label": e.get("data", {}).get("label")} for e in graph_data.get("edges", [])]
+    except Exception as e:
+        nodes_summary = []
+        edges_summary = []
+        graph_data = {"nodes": [], "edges": [], "code": source_code}
+
+    prompt = f"""
+Current graph context (nodes and edges):
+Nodes: {json.dumps(nodes_summary)}
+Edges: {json.dumps(edges_summary)}
+
+User Request: {request.query}
+"""
+
+    system_instruction = """
+You are an AI Copilot for a LangGraph visual editor. Your job is to translate a user's natural language request into a sequence of structured graph mutation commands.
+
+The available graph mutations you can perform are:
+1. add_node: Add a new node. Requires `new_id` (the node name).
+2. delete_node: Delete an existing node. Requires `node_id`.
+3. rename: Rename an existing node. Requires `node_id` (old name) and `new_id` (new name).
+4. add_edge: Connect two nodes. Requires `source` and `target`.
+5. delete_edge: Remove an edge. Requires `source` and `target`.
+6. add_conditional_edge: Add a conditional route. Requires `source`, `router_fn` (name of the router function), and `mapping` (dictionary mapping router outcomes to targets).
+
+CRITICAL RULE 1: You can perform multiple structural mutations in a sequence if the user query describes multiple operations (e.g. deleting an old edge and adding a new edge, or adding a node and connecting it). Order the mutations logically (e.g., add a node before connecting it).
+
+CRITICAL RULE 2: You can ONLY perform structural mutations. If the user requests changes to custom business logic, python code implementations, node function bodies, prompt templates, or anything that requires writing or changing custom Python logic/variables, you MUST reject the query.
+
+You must respond in JSON format with the following keys:
+- "message": A polite user-facing explanation of the action you took or why you rejected the request.
+- "rejected": A boolean (true if the query was rejected, false otherwise).
+- "mutations": If not rejected, an array of objects, where each object contains:
+  - "action": One of ["add_node", "delete_node", "rename", "add_edge", "delete_edge", "add_conditional_edge"]
+  - "source": string (optional)
+  - "target": string (optional)
+  - "node_id": string (optional)
+  - "new_id": string (optional)
+  - "payload": object (optional, e.g., mapping and router_fn)
+"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+            ),
+        )
+        
+        result = json.loads(response.text)
+    except Exception as e:
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"AI service failed: {str(e)}",
+            "graph": graph_data
+        }
+
+    if result.get("rejected") or not result.get("mutations"):
+        return {
+            "success": False,
+            "message": result.get("message", "I cannot perform that request as it does not involve a structural graph mutation."),
+            "graph": graph_data
+        }
+
+    mutations = result["mutations"]
+    
+    try:
+        target_var = None
+        graphs = get_available_graphs()
+        selected = next((g for g in graphs if g["id"] == request.graph_id), None)
+        if selected:
+            target_var = selected["var"]
+            
+        current_code = source_code
+        for mutation in mutations:
+            action = mutation.get("action")
+            current_code = apply_mutation_to_source(
+                source_code=current_code,
+                action=action,
+                node_id=mutation.get("node_id"),
+                new_id=mutation.get("new_id"),
+                source=mutation.get("source"),
+                target=mutation.get("target"),
+                payload=mutation.get("payload"),
+                target_var=target_var
+            )
+
+        with open(file_path, "w", encoding="utf8") as f:
+            f.write(current_code)
+            
+        updated_graph = parse_code_to_graph(current_code, request.graph_id)
+        return {
+            "success": True,
+            "message": result.get("message", "Mutations applied successfully."),
+            "graph": updated_graph
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Failed to apply mutations: {str(e)}",
+            "graph": graph_data
+        }
 
 if __name__ == "__main__":
     import uvicorn

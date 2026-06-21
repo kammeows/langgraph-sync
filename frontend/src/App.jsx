@@ -89,6 +89,53 @@ function App() {
   const restoredGraphIdRef = useRef(null);
   const highlightedGraphIdRef = useRef(null);
 
+  // AI Copilot and resizable panel states
+  const [editorHeightPercent, setEditorHeightPercent] = useState(50);
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef(null);
+  const [copilotMessages, setCopilotMessages] = useState([
+    {
+      sender: "copilot",
+      content: "Hello! I'm your LangGraph Autopilot. Ask me to make structural graph changes, like adding/renaming nodes, or connecting them together.",
+    },
+  ]);
+  const [copilotInput, setCopilotInput] = useState("");
+  const [isCopilotLoading, setIsCopilotLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const handleDividerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e) => {
+      if (!sidebarRef.current) return;
+      const rect = sidebarRef.current.getBoundingClientRect();
+      const relativeY = e.clientY - rect.top;
+      const percentage = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
+      setEditorHeightPercent(percentage);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [copilotMessages, isCopilotLoading]);
+
   useEffect(() => {
     fetch("http://localhost:8000/api/graphs")
       .then((res) => res.json())
@@ -292,6 +339,43 @@ function App() {
     },
     [onRenameEdgeLabel, onUpdateEdgeData, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels, selectedGraphId],
   );
+
+  const handleSendCopilotMessage = useCallback(async (textToPost) => {
+    const text = textToPost || copilotInput;
+    if (!text.trim() || !selectedGraphId) return;
+
+    setCopilotMessages(prev => [...prev, { sender: 'user', content: text }]);
+    if (!textToPost) setCopilotInput("");
+    setIsCopilotLoading(true);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/copilot/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: text, graph_id: selectedGraphId }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setCopilotMessages(prev => [...prev, { sender: 'copilot', content: data.message }]);
+          if (data.graph) {
+            if (data.graph.code !== undefined) setCode(data.graph.code);
+            processGraphStateInternal(data.graph);
+          }
+        } else {
+          setCopilotMessages(prev => [...prev, { sender: 'copilot', content: data.message, isError: true }]);
+        }
+      } else {
+        setCopilotMessages(prev => [...prev, { sender: 'copilot', content: "Failed to connect to the Copilot service.", isError: true }]);
+      }
+    } catch (error) {
+      console.error("Copilot error:", error);
+      setCopilotMessages(prev => [...prev, { sender: 'copilot', content: "Error connecting to AI Copilot: " + error.message, isError: true }]);
+    } finally {
+      setIsCopilotLoading(false);
+    }
+  }, [copilotInput, selectedGraphId, setCode, processGraphStateInternal]);
 
   // 4. Backend-Calling Handlers
 
@@ -744,27 +828,184 @@ function App() {
         <StateSchemaPanel schema={stateSchema} />
       </div>
 
-      <div className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}>
-        <div className="editor-header">
-          <span>Source Code</span>
-        </div>
-        <div className="monaco-editor-wrapper">
-          <Editor
-            height="100%"
-            language="python"
-            theme="vs-dark"
-            value={code}
-            onMount={handleEditorDidMount}
-            onChange={handleEditorChange}
-            options={{
-              readOnly: false,
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-            }}
-          />
+      <div 
+        ref={sidebarRef}
+        className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}
+      >
+        <div className="sidebar-panel-container">
+          {/* 1. Source Code Panel */}
+          <div 
+            className="editor-panel"
+            style={
+              editorHeightPercent === 0 
+                ? { display: 'none' } 
+                : editorHeightPercent === 100 
+                  ? { height: '100%' } 
+                  : { height: `${editorHeightPercent}%` }
+            }
+          >
+            <div className="editor-header">
+              <span>Source Code</span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {editorHeightPercent < 100 && (
+                  <button 
+                    className="panel-action-btn"
+                    onClick={() => setEditorHeightPercent(100)}
+                    title="Maximize Code Editor"
+                  >
+                    🗖 Maximize
+                  </button>
+                )}
+                {editorHeightPercent > 0 && editorHeightPercent < 100 && (
+                  <button 
+                    className="panel-action-btn"
+                    onClick={() => setEditorHeightPercent(0)}
+                    title="Collapse Code Editor"
+                  >
+                    🗕 Collapse
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="monaco-editor-wrapper" style={{ height: 'calc(100% - 40px)' }}>
+              <Editor
+                height="100%"
+                language="python"
+                theme="vs-dark"
+                value={code}
+                onMount={handleEditorDidMount}
+                onChange={handleEditorChange}
+                options={{
+                  readOnly: false,
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  lineNumbers: "on",
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* 2. Draggable Divider */}
+          {editorHeightPercent > 0 && editorHeightPercent < 100 && (
+            <div 
+              className={`sidebar-divider ${isResizing ? 'dragging' : ''}`}
+              onMouseDown={handleDividerMouseDown}
+            />
+          )}
+
+          {/* 3. AI Copilot Panel */}
+          <div 
+            className="copilot-panel"
+            style={
+              editorHeightPercent === 100 
+                ? { display: 'none' } 
+                : editorHeightPercent === 0 
+                  ? { height: '100%' } 
+                  : { height: `${100 - editorHeightPercent}%` }
+            }
+          >
+            <div className="editor-header">
+              <span>🤖 AI Copilot</span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {editorHeightPercent > 0 && (
+                  <button 
+                    className="panel-action-btn"
+                    onClick={() => setEditorHeightPercent(0)}
+                    title="Maximize AI Copilot"
+                  >
+                    🗖 Maximize
+                  </button>
+                )}
+                {editorHeightPercent < 100 && editorHeightPercent > 0 && (
+                  <button 
+                    className="panel-action-btn"
+                    onClick={() => setEditorHeightPercent(100)}
+                    title="Collapse AI Copilot"
+                  >
+                    🗕 Collapse
+                  </button>
+                )}
+                {editorHeightPercent !== 50 && (
+                  <button 
+                    className="panel-action-btn"
+                    onClick={() => setEditorHeightPercent(50)}
+                    title="Split 50/50"
+                  >
+                    ⚖ Split 50/50
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="copilot-chat-container">
+              <div className="copilot-messages">
+                {copilotMessages.map((msg, index) => (
+                  <div 
+                    key={index} 
+                    className={`copilot-message ${msg.sender} ${msg.isError ? 'error' : ''}`}
+                  >
+                    {msg.content}
+                  </div>
+                ))}
+                {isCopilotLoading && (
+                  <div className="typing-indicator">
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              
+              <div className="copilot-input-area">
+                <div className="copilot-suggestions">
+                  <button 
+                    className="suggestion-chip"
+                    onClick={() => handleSendCopilotMessage("Add a node called database_lookup")}
+                  >
+                    ➕ Add node 'database_lookup'
+                  </button>
+                  <button 
+                    className="suggestion-chip"
+                    onClick={() => handleSendCopilotMessage("Connect router_v2 to tool")}
+                  >
+                    🔗 Connect 'router_v2' to 'tool'
+                  </button>
+                  <button 
+                    className="suggestion-chip"
+                    onClick={() => handleSendCopilotMessage("Rename researcherss to researcher")}
+                  >
+                    📝 Rename 'researcherss'
+                  </button>
+                  <button 
+                    className="suggestion-chip"
+                    onClick={() => handleSendCopilotMessage("Modify prompt inside research_agent")}
+                  >
+                    ⚠️ Test business logic block
+                  </button>
+                </div>
+                <div className="copilot-input-wrapper">
+                  <input 
+                    type="text"
+                    className="copilot-input"
+                    placeholder="Ask copilot to change graph structure..."
+                    value={copilotInput}
+                    onChange={(e) => setCopilotInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendCopilotMessage()}
+                    disabled={isCopilotLoading}
+                  />
+                  <button 
+                    className="copilot-send-btn"
+                    onClick={() => handleSendCopilotMessage()}
+                    disabled={isCopilotLoading || !copilotInput.trim()}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
