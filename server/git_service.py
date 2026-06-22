@@ -10,8 +10,25 @@ def get_workspace_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def run_git_cmd(args: List[str], cwd: str) -> str:
-    res = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=True)
-    return res.stdout.strip()
+    try:
+        res = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=True)
+        return res.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        # Securely mask tokens in command arguments to prevent secret leakage
+        safe_cmd = []
+        for arg in e.cmd:
+            if "@github.com" in arg or "github_pat_" in arg or "ghp_" in arg:
+                masked = re.sub(r"https://[^@]+@", "https://***@", arg)
+                safe_cmd.append(masked)
+            else:
+                safe_cmd.append(arg)
+        
+        err_msg = f"Git command failed: {' '.join(safe_cmd)}"
+        if e.stderr:
+            # Securely mask tokens in stderr text
+            safe_stderr = re.sub(r"github_pat_[a-zA-Z0-9_]+|ghp_[a-zA-Z0-9_]+", "***", e.stderr)
+            err_msg += f"\nDetails: {safe_stderr.strip()}"
+        raise RuntimeError(err_msg) from e
 
 def get_github_repo_info(cwd: str) -> tuple[str, str]:
     try:

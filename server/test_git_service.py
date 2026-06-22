@@ -6,9 +6,28 @@ import sys
 # Add server directory to path if not already there
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from git_service import get_git_status, get_git_diff, create_pull_request, get_github_repo_info
+from git_service import get_git_status, get_git_diff, create_pull_request, get_github_repo_info, run_git_cmd
 
 class TestGitService(unittest.TestCase):
+
+    @patch("git_service.subprocess.run")
+    def test_run_git_cmd_mask_error(self, mock_sub_run):
+        import subprocess
+        # Mock subprocess.run raising CalledProcessError containing token
+        mock_sub_run.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "push", "https://github_pat_SECRET123@github.com/owner/repo.git"],
+            stderr="error: failed to push some refs to 'https://github_pat_SECRET123@github.com/owner/repo.git'"
+        )
+
+        with self.assertRaises(RuntimeError) as context:
+            run_git_cmd(["push", "https://github_pat_SECRET123@github.com/owner/repo.git"], "/dummy")
+
+        err_msg = str(context.exception)
+        # Verify the secret token is masked in the error message
+        self.assertNotIn("SECRET123", err_msg)
+        self.assertIn("https://***@github.com/owner/repo.git", err_msg)
+        self.assertIn("Details:", err_msg)
 
     @patch("git_service.run_git_cmd")
     def test_get_github_repo_info_https(self, mock_run):
