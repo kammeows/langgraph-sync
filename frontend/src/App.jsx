@@ -245,7 +245,6 @@ function App() {
   // Uses handlersRef.current for injection to avoid dependency cycles
   const processGraphStateInternal = useCallback(
     (data) => {
-      const handlers = handlersRef.current || {};
       const nodesWithHandlers = data.nodes.map((node) => ({
         ...node,
         data: {
@@ -253,11 +252,11 @@ function App() {
           type: node.type,
           onDelete: (id) => {
             if (id === "__start__") return;
-            handlers.onDeleteNode && handlers.onDeleteNode(id);
+            handlersRef.current?.onDeleteNode && handlersRef.current.onDeleteNode(id);
           },
           onRename: (id, label) => {
             if (id === "__start__" || id === "__end__") return;
-            handlers.onRenameNode && handlers.onRenameNode(id, label);
+            handlersRef.current?.onRenameNode && handlersRef.current.onRenameNode(id, label);
           },
         },
       }));
@@ -290,7 +289,7 @@ function App() {
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
             onDelete: (id) => {
-              handlers.onDeleteEdge && handlers.onDeleteEdge(id);
+              handlersRef.current?.onDeleteEdge && handlersRef.current.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,
             onUpdateData: onUpdateEdgeData,
@@ -437,6 +436,10 @@ function App() {
       const edge = edges.find((e) => e.id === id);
       if (!edge) return;
 
+      if (!window.confirm(`Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`)) {
+        return;
+      }
+
       try {
         const response = await fetch("http://localhost:8000/api/graph/mutate", {
           method: "POST",
@@ -459,6 +462,83 @@ function App() {
       }
     },
     [edges, processGraphStateInternal, setCode, selectedGraphId],
+  );
+
+  const onEdgesDelete = useCallback(
+    async (deletedEdges) => {
+      const activeNodeIds = new Set(nodes.map((n) => n.id));
+      for (const edge of deletedEdges) {
+        if (!activeNodeIds.has(edge.source) || !activeNodeIds.has(edge.target)) {
+          continue;
+        }
+        if (!window.confirm(`Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`)) {
+          // Restore local edge state from backend
+          fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
+            .then((res) => res.json())
+            .then((data) => processGraphStateInternal(data))
+            .catch(console.error);
+          continue;
+        }
+        try {
+          const response = await fetch("http://localhost:8000/api/graph/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "delete_edge",
+              source: edge.source,
+              target: edge.target,
+              payload: { condition: edge.data?.condition },
+              graph_id: selectedGraphId,
+            }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.code !== undefined) setCode(data.code);
+            processGraphStateInternal(data);
+          }
+        } catch (error) {
+          console.error("Delete edge failed:", error);
+        }
+      }
+    },
+    [nodes, selectedGraphId, processGraphStateInternal, setCode],
+  );
+
+  const onNodesDelete = useCallback(
+    async (deletedNodes) => {
+      for (const node of deletedNodes) {
+        if (node.id === "__start__" || node.id === "__end__") {
+          continue;
+        }
+        if (!window.confirm(`Are you sure you want to delete node "${node.id}"?`)) {
+          // Restore local node state from backend
+          fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
+            .then((res) => res.json())
+            .then((data) => processGraphStateInternal(data))
+            .catch(console.error);
+          continue;
+        }
+        try {
+          const response = await fetch("http://localhost:8000/api/graph/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "delete_node",
+              node_id: node.id,
+              graph_id: selectedGraphId,
+            }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.code !== undefined) setCode(data.code);
+            processGraphStateInternal(data);
+          }
+        } catch (error) {
+          console.error("Delete node failed:", error);
+        }
+      }
+    },
+    [selectedGraphId, processGraphStateInternal, setCode]
   );
 
   const onConnect = useCallback(
@@ -820,6 +900,8 @@ function App() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodesDelete={onNodesDelete}
+          onEdgesDelete={onEdgesDelete}
           onNodeClick={onNodeClick}
           onNodeDragStop={onNodeDragStop}
           onSelectionChange={onSelectionChange}
