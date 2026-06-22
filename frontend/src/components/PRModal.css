@@ -1,0 +1,262 @@
+.pr-modal-content {
+  background-color: #1a1a1a;
+  color: #f3f4f6;
+  padding: 24px;
+  border-radius: 12px;
+  width: 650px;
+  max-width: 90vw;
+  max-height: 85vh;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  border: 1px solid #333333;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pr-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #2d2d2d;
+  padding-bottom: 12px;
+}
+
+.pr-modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.close-x-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.close-x-btn:hover {
+  color: #f3f4f6;
+}
+
+.pr-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.pr-error-banner {
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #f87171;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.git-repo-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background-color: #111;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #222;
+  font-size: 0.8rem;
+}
+
+.repo-badge {
+  background-color: #222;
+  color: #d1d5db;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.status-badge.clean {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.status-badge.dirty {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.pr-empty-warning {
+  text-align: center;
+  padding: 40px 20px;
+  background-color: #151515;
+  border: 1px dashed #333;
+  border-radius: 8px;
+}
+
+.pr-empty-warning p {
+  margin: 0 0 8px 0;
+  color: #9ca3af;
+}
+
+.pr-empty-warning .hint {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.diff-preview-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diff-preview-container label {
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+
+.diff-viewer {
+  background-color: #0d0d0d;
+  border: 1px solid #222;
+  border-radius: 6px;
+  max-height: 250px;
+  overflow: auto;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.75rem;
+}
+
+.diff-code {
+  margin: 0;
+  padding: 8px;
+}
+
+.diff-line {
+  white-space: pre-wrap;
+  padding: 2px 6px;
+  min-height: 18px;
+  color: #d1d5db;
+}
+
+.diff-line.diff-add {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #a7f3d0;
+}
+
+.diff-line.diff-del {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.diff-line.diff-header {
+  color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.pr-submitting-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.mini-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(96, 165, 250, 0.3);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: pr-spin 0.8s linear infinite;
+}
+
+.pr-modal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 50px 20px;
+  gap: 16px;
+}
+
+.pr-modal-loading p {
+  color: #9ca3af;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: pr-spin 1s linear infinite;
+}
+
+.pr-modal-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 30px 20px;
+}
+
+.success-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+}
+
+.pr-modal-success h4 {
+  margin: 0 0 10px 0;
+  font-size: 1.15rem;
+  color: #34d399;
+}
+
+.success-msg {
+  color: #9ca3af;
+  margin: 0 0 20px 0;
+  font-size: 0.9rem;
+}
+
+.view-pr-link {
+  display: inline-block;
+  background-color: #10b981;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  margin-bottom: 24px;
+}
+
+.view-pr-link:hover {
+  background-color: #059669;
+}
+
+.pr-submit-btn {
+  background-color: #8b5cf6;
+}
+
+.pr-submit-btn:hover:not(:disabled) {
+  background-color: #7c3aed;
+}
+
+@keyframes pr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

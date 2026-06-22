@@ -10,7 +10,6 @@ from agents.extra_module import (
 )
 
 builder = StateGraph(AgentState)
-
 builder.add_node("router_v2", router_agent)
 builder.add_node("research", research_agent)
 builder.add_node("tool", tool_agent)

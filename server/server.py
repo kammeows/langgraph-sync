@@ -8,6 +8,11 @@ import traceback
 import json
 from dotenv import load_dotenv
 from copilot.service import run_copilot_chat
+from git_service import get_git_status, get_git_diff, create_pull_request
+
+class CreatePRRequest(BaseModel):
+    title: str
+    body: str
 
 # Import our parser and transformer
 from parser_libcst import (
@@ -153,6 +158,21 @@ async def sync_graph(request: SyncRequest):
 @app.get("/api/graphs")
 async def list_graphs():
     return get_available_graphs()
+
+@app.get("/api/git/status")
+async def git_status():
+    return get_git_status()
+
+@app.get("/api/git/diff")
+async def git_diff():
+    return {"diff": get_git_diff()}
+
+@app.post("/api/git/create-pr")
+async def git_create_pr(request: CreatePRRequest):
+    res = create_pull_request(request.title, request.body)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to create PR"))
+    return res
 
 @app.get("/api/graph")
 async def get_graph(graph_id: Optional[str] = None):

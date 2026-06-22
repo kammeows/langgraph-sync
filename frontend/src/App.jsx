@@ -15,6 +15,7 @@ import EditableNode from "./components/EditableNode";
 import DeletableEdge from "./components/DeletableEdge";
 import SelfLoopEdge from "./components/SelfLoopEdge";
 import ConditionalRouteModal from "./components/ConditionalRouteModal";
+import PRModal from "./components/PRModal";
 import ValidationPanel from "./components/ValidationPanel";
 import StateSchemaPanel from "./components/StateSchemaPanel";
 
@@ -79,6 +80,7 @@ function App() {
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
+  const [isPRModalOpen, setIsPRModalOpen] = useState(false);
   const [graphsList, setGraphsList] = useState([]);
   const [selectedGraphId, setSelectedGraphId] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
@@ -775,6 +777,13 @@ function App() {
           >
             📁 Upload Code
           </button>
+          <button 
+            className="add-node-btn" 
+            style={{ backgroundColor: "#0284c7" }}
+            onClick={() => setIsPRModalOpen(true)}
+          >
+            🚀 Create Pull Request
+          </button>
           <input
             type="file"
             id="code-upload-input"
@@ -1014,6 +1023,11 @@ function App() {
         onClose={() => setIsCondModalOpen(false)}
         onAdd={onAddConditionalEdge}
         nodes={nodes}
+      />
+
+      <PRModal 
+        isOpen={isPRModalOpen}
+        onClose={() => setIsPRModalOpen(false)}
       />
     </div>
   );
