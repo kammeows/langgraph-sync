@@ -397,7 +397,10 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         if self.target_var and not self.graph_var_names and self._potential_builders:
             self.graph_var_names.update(self._potential_builders)
 
-        # Finalize state schema
+        # Store the original class name set by StateGraph instantiation
+        original_state_class_name = self.state_class_name
+
+        # Finalize state schema (first pass)
         if self.state_class_name and self.state_class_name in self.class_schemas:
             self.state_schema = self.class_schemas[self.state_class_name]
         else:
@@ -472,6 +475,21 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                 
                 except Exception as e:
                     print(f"Error recursively parsing {resolved_file}: {e}")
+
+        # Finalize state schema again (second pass, after recursive imports are merged)
+        if original_state_class_name:
+            self.state_class_name = original_state_class_name
+            
+        if self.state_class_name and self.state_class_name in self.class_schemas:
+            self.state_schema = self.class_schemas[self.state_class_name]
+        else:
+            state_classes = [name for name in self.class_schemas.keys() if "State" in name]
+            if state_classes:
+                self.state_class_name = "AgentState" if "AgentState" in state_classes else state_classes[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
+            elif self.class_schemas:
+                self.state_class_name = list(self.class_schemas.keys())[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
 
         # Resolve empty mappings for conditional edges
         for cond in self.conditional_edges:
