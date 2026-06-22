@@ -104,7 +104,14 @@ def parse_code_to_graph(source_code: str, graph_id: Optional[str] = None):
             if selected:
                 target_var = selected["var"]
 
-        analyzer = LangGraphAnalyzer(target_var=target_var)
+        file_path = None
+        if graph_id:
+            try:
+                file_path = get_graph_file_path(graph_id)
+            except Exception:
+                pass
+
+        analyzer = LangGraphAnalyzer(target_var=target_var, current_file_path=file_path, workspace_root=WORKSPACE_ROOT)
         wrapper.visit(analyzer)
 
         tool_visitor = ToolCallVisitor()
@@ -182,7 +189,8 @@ def apply_mutation_to_source(
     source: Optional[str] = None,
     target: Optional[str] = None,
     payload: Optional[dict] = None,
-    target_var: Optional[str] = None
+    target_var: Optional[str] = None,
+    current_file_path: Optional[str] = None
 ) -> str:
     if action == "rename":
         module = cst.parse_module(source_code)
@@ -192,7 +200,7 @@ def apply_mutation_to_source(
 
     elif action == "add_node":
         module = cst.parse_module(source_code)
-        analyzer = LangGraphAnalyzer(target_var=target_var)
+        analyzer = LangGraphAnalyzer(target_var=target_var, current_file_path=current_file_path, workspace_root=WORKSPACE_ROOT)
         cst.metadata.MetadataWrapper(module).visit(analyzer)
         existing_nodes = set(analyzer.nodes.keys())
         existing_functions = set(analyzer.functions)
@@ -220,7 +228,7 @@ def apply_mutation_to_source(
         else:
             # Check for duplication first
             module = cst.parse_module(source_code)
-            analyzer = LangGraphAnalyzer(target_var=target_var)
+            analyzer = LangGraphAnalyzer(target_var=target_var, current_file_path=current_file_path, workspace_root=WORKSPACE_ROOT)
             cst.metadata.MetadataWrapper(module).visit(analyzer)
             
             if (source, target) in analyzer.edges:
@@ -280,7 +288,8 @@ async def mutate_graph(request: MutationRequest):
             source=request.source,
             target=request.target,
             payload=request.payload,
-            target_var=target_var
+            target_var=target_var,
+            current_file_path=file_path
         )
 
         with open(file_path, "w", encoding="utf8") as f:
@@ -370,7 +379,8 @@ async def copilot_chat(request: CopilotChatRequest):
                 source=mutation.get("source"),
                 target=mutation.get("target"),
                 payload=mutation.get("payload"),
-                target_var=target_var
+                target_var=target_var,
+                current_file_path=file_path
             )
 
         with open(file_path, "w", encoding="utf8") as f:

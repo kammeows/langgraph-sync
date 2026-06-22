@@ -1,11 +1,49 @@
 import libcst as cst
 from libcst import matchers as m
+import os
+from typing import Optional, Set, Dict, Any, List
 
+def resolve_module_to_file(module_name: str, current_file_path: str, workspace_root: str) -> Optional[str]:
+    # Support relative imports
+    sub_path = module_name.lstrip(".").replace(".", os.sep)
+    if module_name.startswith("."):
+        dots_count = len(module_name) - len(module_name.lstrip("."))
+        dir_path = os.path.dirname(current_file_path)
+        for _ in range(dots_count - 1):
+            dir_path = os.path.dirname(dir_path)
+        file_path = os.path.join(dir_path, sub_path + ".py")
+        if os.path.exists(file_path):
+            return file_path
+    else:
+        # Check relative to current file's folder first
+        dir_path = os.path.dirname(current_file_path)
+        file_path = os.path.join(dir_path, sub_path + ".py")
+        if os.path.exists(file_path):
+            return file_path
+        # Then check relative to workspace root
+        file_path = os.path.join(workspace_root, sub_path + ".py")
+        if os.path.exists(file_path):
+            return file_path
+            
+    return None
+
+def extract_callable_name(node: cst.CSTNode) -> Optional[str]:
+    if isinstance(node, cst.Name):
+        return node.value
+    elif isinstance(node, cst.Attribute):
+        val_str = extract_callable_name(node.value)
+        if val_str:
+            return f"{val_str}.{node.attr.value}"
+    elif isinstance(node, cst.Call):
+        return extract_callable_name(node.func)
+    elif isinstance(node, cst.Lambda):
+        return "lambda"
+    return None
 
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
-    def __init__(self, target_var: str = None):
+    def __init__(self, target_var: str = None, current_file_path: Optional[str] = None, visited_files: Optional[Set[str]] = None, workspace_root: Optional[str] = None):
         super().__init__()
         self.functions = []
         self.function_lines = {}
@@ -19,80 +57,219 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self.class_schemas = {}
-        self._current_function = None
+        
         self.target_var = target_var
         self.graph_var_names = set()
         self._potential_builders = set()
+        
+        self.current_file_path = current_file_path
+        self.visited_files = visited_files if visited_files is not None else set()
+        self.workspace_root = workspace_root
+        self.imports_map = {}
+        self.variable_types = {}
+        
+        self._current_function = None
+        self._state_param_name = None
+        self._class_stack = []
+        self._function_stack = []
+        self._local_assignments = {}
+        
+        if current_file_path:
+            self.visited_files.add(os.path.abspath(current_file_path))
+
+    def resolve_callable_name(self, name_str: str) -> str:
+        if not name_str:
+            return name_str
+        
+        # 1. Resolve local/nested function names
+        if self._function_stack and not name_str.startswith(self._function_stack[-1]):
+            nested_candidate = f"{self._function_stack[-1]}.{name_str}"
+            if nested_candidate in self.functions:
+                return nested_candidate
+
+        # 2. Handle class instances: agent.call_agent -> MyClass.call_agent
+        if "." in name_str:
+            parts = name_str.split(".")
+            prefix = ".".join(parts[:-1])
+            method = parts[-1]
+            if prefix in self.variable_types:
+                resolved_class = self.variable_types[prefix]
+                return f"{resolved_class}.{method}"
+                
+        # 3. Handle __call__ if it's a class reference
+        if name_str in self.class_schemas:
+            call_method = f"{name_str}.__call__"
+            if call_method in self.functions:
+                return call_method
+
+        return name_str
 
     def visit_Assign(self, node: cst.Assign):
-        # Look for: builder = StateGraph(AgentState)
+        # Detect StateGraph(AgentState)
         if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
             for target in node.targets:
                 if isinstance(target.target, cst.Name):
                     var_name = target.target.value
                     self._potential_builders.add(var_name)
-                    # Always track builders so we can collect their nodes/edges as we encounter them
                     self.graph_var_names.add(var_name)
                         
-        # Look for: graph = builder.compile()
+        # Detect compile() call
         elif self.target_var and isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute):
             if node.value.func.attr.value == "compile":
                 if isinstance(node.value.func.value, cst.Name):
                     builder_name = node.value.func.value.value
                     for target in node.targets:
                         if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
-                            # This confirms builder_name is the one mapped to target_var
-                            # (Currently we just collect all, but this helps verify)
                             pass
 
-    def leave_Module(self, original_node: cst.Module):
-        # Fallback: if target_var was specified but we couldn't find graph = builder.compile()
-        # just use all potential builders found.
-        if self.target_var and not self.graph_var_names and self._potential_builders:
-            self.graph_var_names.update(self._potential_builders)
+        # Detect assignments for variable types mapping
+        if isinstance(node.value, cst.Call):
+            class_name = None
+            if isinstance(node.value.func, cst.Name):
+                class_name = node.value.func.value
+            elif isinstance(node.value.func, cst.Attribute) and isinstance(node.value.func.attr, cst.Name):
+                class_name = node.value.func.attr.value
+            
+            if class_name and class_name[0].isupper():
+                for target in node.targets:
+                    if isinstance(target.target, cst.Name):
+                        var_name = target.target.value
+                        self.variable_types[var_name] = class_name
 
-        # Finalize the state schema selection based on the compiled graph state class if known,
-        # otherwise fallback to classes with "State" in their name or the first available class schema.
-        if self.state_class_name and self.state_class_name in self.class_schemas:
-            self.state_schema = self.class_schemas[self.state_class_name]
+        # Detect local assignments inside functions
+        if self._current_function:
+            for target in node.targets:
+                if isinstance(target.target, cst.Name):
+                    var_name = target.target.value
+                    val = None
+                    if isinstance(node.value, cst.SimpleString):
+                        val = node.value.evaluated_value
+                    elif isinstance(node.value, cst.Name) and node.value.value == "END":
+                        val = "__end__"
+                    
+                    if val is not None:
+                        if var_name not in self._local_assignments:
+                            self._local_assignments[var_name] = []
+                        self._local_assignments[var_name].append(val)
+
+    def visit_Import(self, node: cst.Import):
+        for name in node.names:
+            alias = name.asname.name.value if name.asname else name.name.value
+            self.imports_map[alias] = {
+                "module": name.name.value,
+                "name": None
+            }
+
+    def visit_ImportFrom(self, node: cst.ImportFrom):
+        level = len(node.relative)
+        if not node.module:
+            module_name = "." * level
         else:
-            state_classes = [name for name in self.class_schemas.keys() if "State" in name]
-            if state_classes:
-                if "AgentState" in state_classes:
-                    self.state_class_name = "AgentState"
-                else:
-                    self.state_class_name = state_classes[0]
-                self.state_schema = self.class_schemas[self.state_class_name]
-            elif self.class_schemas:
-                self.state_class_name = list(self.class_schemas.keys())[0]
-                self.state_schema = self.class_schemas[self.state_class_name]
+            module_name = "." * level + cst.parse_module("").code_for_node(node.module).strip()
 
-    # ----------------------------------
-    # Collect all function defs
-    # ----------------------------------
+        if isinstance(node.names, cst.ImportStar):
+            self.imports_map["*"] = {
+                "module": module_name,
+                "name": "*"
+            }
+        else:
+            for name in node.names:
+                alias = name.asname.name.value if name.asname else name.name.value
+                self.imports_map[alias] = {
+                    "module": module_name,
+                    "name": name.name.value
+                }
+
+    def visit_ClassDef(self, node: cst.ClassDef):
+        class_name = node.name.value
+        self._class_stack.append(class_name)
+        
+        schema = {}
+        for item in node.body.body:
+            if isinstance(item, cst.SimpleStatementLine):
+                for part in item.body:
+                    if isinstance(part, cst.AnnAssign) and isinstance(part.target, cst.Name):
+                        key = part.target.value
+                        anno = "any"
+                        if isinstance(part.annotation.annotation, cst.Name):
+                            anno = part.annotation.annotation.value
+                        elif isinstance(part.annotation.annotation, cst.Subscript):
+                            try:
+                                anno = cst.parse_module("").code_for_node(part.annotation.annotation)
+                            except Exception:
+                                anno = "complex_type"
+                        schema[key] = anno
+        
+        is_messages_state = False
+        for base in node.bases:
+            if isinstance(base.value, cst.Name) and base.value.value == "MessagesState":
+                is_messages_state = True
+            elif isinstance(base.value, cst.Attribute) and isinstance(base.value.attr, cst.Name) and base.value.attr.value == "MessagesState":
+                is_messages_state = True
+
+        if is_messages_state and "messages" not in schema:
+            schema["messages"] = "list"
+
+        full_class_name = ".".join(self._class_stack)
+        self.class_schemas[full_class_name] = schema
+
+    def leave_ClassDef(self, node: cst.ClassDef):
+        self._class_stack.pop()
 
     def visit_FunctionDef(self, node: cst.FunctionDef):
         func_name = node.name.value
+        if self._class_stack:
+            func_name = f"{'.'.join(self._class_stack)}.{func_name}"
+        if self._function_stack:
+            func_name = f"{self._function_stack[-1]}.{node.name.value}"
+            
+        self._function_stack.append(func_name)
         self.functions.append(func_name)
+        
         self.function_returns[func_name] = []
         self.function_update_keys[func_name] = []
         self.function_input_keys[func_name] = []
         self._current_function = func_name
         self._state_param_name = None
+        self._local_assignments = {}
         
-        # Identify the state parameter name (usually 'state')
         if node.params.params:
-            self._state_param_name = node.params.params[0].name.value
+            first_param = node.params.params[0].name.value
+            if first_param in ("self", "cls") and len(node.params.params) > 1:
+                self._state_param_name = node.params.params[1].name.value
+            else:
+                self._state_param_name = first_param
 
-        # Capture line numbers using metadata
-        pos = self.get_metadata(cst.metadata.PositionProvider, node)
-        start_line = pos.start.line
-        end_line = pos.end.line
-        self.function_lines[func_name] = (start_line, end_line)
+        try:
+            pos = self.get_metadata(cst.metadata.PositionProvider, node)
+            start_line = pos.start.line
+            end_line = pos.end.line
+            self.function_lines[func_name] = (start_line, end_line)
+        except Exception:
+            self.function_lines[func_name] = (1, 1)
+
+        # Parse decorators for graph registration
+        for dec in node.decorators:
+            dec_expr = dec.decorator
+            dec_name = extract_callable_name(dec_expr)
+            if dec_name:
+                is_register = False
+                node_name = func_name
+                
+                if "add_node" in dec_name or "register_node" in dec_name or dec_name.endswith(".node"):
+                    is_register = True
+                    
+                if is_register:
+                    if isinstance(dec_expr, cst.Call) and dec_expr.args:
+                        if isinstance(dec_expr.args[0].value, cst.SimpleString):
+                            node_name = dec_expr.args[0].value.evaluated_value
+                    self.nodes[node_name] = func_name
 
     def leave_FunctionDef(self, node: cst.FunctionDef):
-        self._current_function = None
+        self._function_stack.pop()
+        self._current_function = self._function_stack[-1] if self._function_stack else None
         self._state_param_name = None
+        self._local_assignments = {}
 
     def visit_Subscript(self, node: cst.Subscript):
         if self._current_function and self._state_param_name:
@@ -106,45 +283,38 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
     def visit_Return(self, node: cst.Return):
         if self._current_function and node.value:
-            # 1. Handle string returns (routing keys)
+            # 1. Simple String/END return
             if isinstance(node.value, cst.SimpleString):
                 self.function_returns[self._current_function].append(node.value.evaluated_value)
-            elif isinstance(node.value, cst.Name) and node.value.value == "END":
-                self.function_returns[self._current_function].append("__end__")
-            
-            # 2. Handle dict returns (state updates)
-            if isinstance(node.value, cst.Dict):
+            elif isinstance(node.value, cst.Name):
+                var_name = node.value.value
+                if var_name == "END":
+                    self.function_returns[self._current_function].append("__end__")
+                elif var_name in self._local_assignments:
+                    for val in self._local_assignments[var_name]:
+                        self.function_returns[self._current_function].append(val)
+
+            # 2. Ternary operator (IfExp)
+            elif isinstance(node.value, cst.IfExp):
+                for expr in (node.value.body, node.value.orelse):
+                    if isinstance(expr, cst.SimpleString):
+                        self.function_returns[self._current_function].append(expr.evaluated_value)
+                    elif isinstance(expr, cst.Name) and expr.value == "END":
+                        self.function_returns[self._current_function].append("__end__")
+
+            # 3. List/Tuple return (for parallel conditional routing)
+            elif isinstance(node.value, (cst.List, cst.Tuple)):
+                for el in node.value.elements:
+                    if isinstance(el.element, cst.SimpleString):
+                        self.function_returns[self._current_function].append(el.element.evaluated_value)
+                    elif isinstance(el.element, cst.Name) and el.element.value == "END":
+                        self.function_returns[self._current_function].append("__end__")
+
+            # 4. Dict return (state updates)
+            elif isinstance(node.value, cst.Dict):
                 for el in node.value.elements:
                     if isinstance(el, cst.DictElement) and isinstance(el.key, cst.SimpleString):
                         self.function_update_keys[self._current_function].append(el.key.evaluated_value)
-
-    def visit_ClassDef(self, node: cst.ClassDef):
-        class_name = node.name.value
-        
-        # Parse fields for any class we encounter.
-        schema = {}
-        for item in node.body.body:
-            if isinstance(item, cst.SimpleStatementLine):
-                for part in item.body:
-                    if isinstance(part, cst.AnnAssign) and isinstance(part.target, cst.Name):
-                        key = part.target.value
-                        anno = "any"
-                        if isinstance(part.annotation.annotation, cst.Name):
-                            anno = part.annotation.annotation.value
-                        elif isinstance(part.annotation.annotation, cst.Subscript):
-                            # Extract string representation of Subscript
-                            try:
-                                anno = cst.parse_module("").code_for_node(part.annotation.annotation)
-                            except Exception:
-                                anno = "complex_type"
-                        schema[key] = anno
-        
-        # If it's MessagesState, it implicitly has 'messages'
-        if any(isinstance(base.value, cst.Name) and base.value.value == "MessagesState" for base in node.bases):
-            if "messages" not in schema:
-                schema["messages"] = "list"
-
-        self.class_schemas[class_name] = schema
 
     def visit_Call(self, node: cst.Call):
         # Detect state.get("key")
@@ -152,125 +322,177 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             if node.args and isinstance(node.args[0].value, cst.SimpleString):
                 self.function_input_keys[self._current_function].append(node.args[0].value.evaluated_value)
 
-        # ----------------------------------
-        # StateGraph(AgentState)
-        # ----------------------------------
+        # Detect StateGraph(AgentState)
         if m.matches(node.func, m.Name("StateGraph")):
             if node.args:
                 arg0 = node.args[0].value
                 if isinstance(arg0, cst.Name):
                     self.state_class_name = arg0.value
 
-        # Extract object name and method name
+        # Extract workflow method calls
         if isinstance(node.func, cst.Attribute) and isinstance(node.func.value, cst.Name):
             obj_name = node.func.value.value
             method_name = node.func.attr.value
 
             if obj_name in self.graph_var_names:
-                
-                # ----------------------------------
-                # workflow.add_node(...)
-                # ----------------------------------
+                # add_node
                 if method_name == "add_node" and len(node.args) >= 2:
                     node_name = None
-                    function_name = None
-
                     if isinstance(node.args[0].value, cst.SimpleString):
                         node_name = node.args[0].value.evaluated_value
 
-                    arg1 = node.args[1].value
-                    if isinstance(arg1, cst.Name):
-                        function_name = arg1.value
-                    elif isinstance(arg1, cst.Call) and isinstance(arg1.func, cst.Name) and arg1.func.value == "ToolNode":
-                        function_name = "ToolNode" # Special marker for tools
+                    raw_fn = extract_callable_name(node.args[1].value)
+                    function_name = self.resolve_callable_name(raw_fn) if raw_fn else None
 
-                    if node_name:
+                    if node_name and function_name:
                         self.nodes[node_name] = function_name
 
-                # ----------------------------------
-                # workflow.add_edge(...)
-                # ----------------------------------
+                # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
                     src = node.args[0].value
                     dst = node.args[1].value
-
-                    src_val = None
-                    dst_val = None
-
-                    # Handle START constant or "__start__"
-                    if isinstance(src, cst.SimpleString):
-                        src_val = src.evaluated_value
-                    elif isinstance(src, cst.Name) and src.value == "START":
-                        src_val = "__start__"
-
-                    if isinstance(dst, cst.SimpleString):
-                        dst_val = dst.evaluated_value
-                    elif isinstance(dst, cst.Name) and dst.value == "END":
-                        dst_val = "__end__"
+                    src_val = src.evaluated_value if isinstance(src, cst.SimpleString) else ("__start__" if isinstance(src, cst.Name) and src.value == "START" else None)
+                    dst_val = dst.evaluated_value if isinstance(dst, cst.SimpleString) else ("__end__" if isinstance(dst, cst.Name) and dst.value == "END" else None)
 
                     if src_val and dst_val:
-                        # If src is START, treat it as an entry point exclusively
                         if src_val == "__start__":
                             self.entry_point = dst_val
                         else:
                             self.edges.append((src_val, dst_val))
 
-                # ----------------------------------
-                # workflow.set_entry_point(...)
-                # ----------------------------------
+                # set_entry_point
                 elif method_name == "set_entry_point" and len(node.args) >= 1:
                     arg0 = node.args[0].value
                     if isinstance(arg0, cst.SimpleString):
                         self.entry_point = arg0.evaluated_value
-        
-                # ----------------------------------
-                # workflow.add_conditional_edges(...)
-                # ----------------------------------
+
+                # add_conditional_edges
                 elif method_name == "add_conditional_edges" and len(node.args) >= 2:
                     source = None
-                    router_fn = None
-
                     if isinstance(node.args[0].value, cst.SimpleString):
                         source = node.args[0].value.evaluated_value
                     elif isinstance(node.args[0].value, cst.Name) and node.args[0].value.value == "START":
                         source = "__start__"
 
-                    if isinstance(node.args[1].value, cst.Name):
-                        router_fn = node.args[1].value.value
+                    raw_router = extract_callable_name(node.args[1].value)
+                    router_fn = self.resolve_callable_name(raw_router) if raw_router else None
 
-                    # Extract mapping
                     mapping = {}
                     if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
                         for elt in node.args[2].value.elements:
                             if isinstance(elt, cst.DictElement):
-                                key = None
-                                val = None
-                                if isinstance(elt.key, cst.SimpleString):
-                                    key = elt.key.evaluated_value
-                                elif isinstance(elt.key, cst.Name):
-                                    if elt.key.value == "END":
-                                        key = "__end__"
-                                    else:
-                                        key = elt.key.value
-
-                                if isinstance(elt.value, cst.SimpleString):
-                                    val = elt.value.evaluated_value
-                                elif isinstance(elt.value, cst.Name):
-                                    if elt.value.value == "END":
-                                        val = "__end__"
-                                    else:
-                                        val = elt.value.value
-                                
+                                key = elt.key.evaluated_value if isinstance(elt.key, cst.SimpleString) else ("__end__" if isinstance(elt.key, cst.Name) and elt.key.value == "END" else (elt.key.value if isinstance(elt.key, cst.Name) else None))
+                                val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
                                 if key and val:
                                     mapping[key] = val
 
-                    self.conditional_edges.append(
-                        {
-                            "source": source,
-                            "router": router_fn,
-                            "mapping": mapping
-                        }
+                    self.conditional_edges.append({
+                        "source": source,
+                        "router": router_fn,
+                        "mapping": mapping
+                    })
+
+    def leave_Module(self, original_node: cst.Module):
+        # Fallback for builders
+        if self.target_var and not self.graph_var_names and self._potential_builders:
+            self.graph_var_names.update(self._potential_builders)
+
+        # Finalize state schema
+        if self.state_class_name and self.state_class_name in self.class_schemas:
+            self.state_schema = self.class_schemas[self.state_class_name]
+        else:
+            state_classes = [name for name in self.class_schemas.keys() if "State" in name]
+            if state_classes:
+                self.state_class_name = "AgentState" if "AgentState" in state_classes else state_classes[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
+            elif self.class_schemas:
+                self.state_class_name = list(self.class_schemas.keys())[0]
+                self.state_schema = self.class_schemas[self.state_class_name]
+
+        # Resolve recursive imports
+        if self.current_file_path:
+            workspace_root = self.workspace_root or os.path.dirname(self.current_file_path)
+            modules_to_parse = {}
+            for alias, imp_info in self.imports_map.items():
+                module_name = imp_info["module"]
+                if module_name not in modules_to_parse:
+                    resolved_file = resolve_module_to_file(module_name, self.current_file_path, workspace_root)
+                    if resolved_file and os.path.abspath(resolved_file) not in self.visited_files:
+                        modules_to_parse[module_name] = resolved_file
+
+            for module_name, resolved_file in modules_to_parse.items():
+                try:
+                    with open(resolved_file, "r", encoding="utf8") as f:
+                        imported_code = f.read()
+                    
+                    imported_module = cst.parse_module(imported_code)
+                    imported_wrapper = cst.metadata.MetadataWrapper(imported_module)
+                    imported_analyzer = LangGraphAnalyzer(
+                        current_file_path=resolved_file, 
+                        visited_files=self.visited_files,
+                        workspace_root=workspace_root
                     )
+                    imported_wrapper.visit(imported_analyzer)
+                    
+                    # Merge imported analyzer results based on import type
+                    for alias, imp_info in self.imports_map.items():
+                        if imp_info["module"] == module_name:
+                            target_name = imp_info["name"]
+                            
+                            if target_name == "*":
+                                for func in imported_analyzer.functions:
+                                    self._merge_function_meta(func, func, imported_analyzer)
+                                for cls_name, schema in imported_analyzer.class_schemas.items():
+                                    self.class_schemas[cls_name] = schema
+                                for var_name, type_name in imported_analyzer.variable_types.items():
+                                    self.variable_types[var_name] = type_name
+                                    
+                            elif target_name is None:
+                                for func in imported_analyzer.functions:
+                                    self._merge_function_meta(func, f"{alias}.{func}", imported_analyzer)
+                                for cls_name, schema in imported_analyzer.class_schemas.items():
+                                    self.class_schemas[f"{alias}.{cls_name}"] = schema
+                                for var_name, type_name in imported_analyzer.variable_types.items():
+                                    self.variable_types[f"{alias}.{var_name}"] = type_name
+                                    
+                            else:
+                                for func in imported_analyzer.functions:
+                                    if func == target_name:
+                                        self._merge_function_meta(func, alias, imported_analyzer)
+                                    elif func.startswith(f"{target_name}."):
+                                        sub_method = func[len(target_name)+1:]
+                                        self._merge_function_meta(func, f"{alias}.{sub_method}", imported_analyzer)
+                                
+                                if target_name in imported_analyzer.class_schemas:
+                                    self.class_schemas[alias] = imported_analyzer.class_schemas[target_name]
+                                
+                                for var_name, type_name in imported_analyzer.variable_types.items():
+                                    if var_name == target_name:
+                                        self.variable_types[alias] = type_name
+                                
+                except Exception as e:
+                    print(f"Error recursively parsing {resolved_file}: {e}")
+
+        # Resolve empty mappings for conditional edges
+        for cond in self.conditional_edges:
+            if not cond["mapping"] and cond["router"]:
+                router = cond["router"]
+                if router in self.function_returns:
+                    for ret in self.function_returns[router]:
+                        if ret:
+                            cond["mapping"][ret] = ret
+
+    def _merge_function_meta(self, orig_name: str, alias_name: str, other_analyzer):
+        if alias_name not in self.functions:
+            self.functions.append(alias_name)
+        if orig_name in other_analyzer.function_lines:
+            self.function_lines[alias_name] = other_analyzer.function_lines[orig_name]
+        if orig_name in other_analyzer.function_returns:
+            self.function_returns[alias_name] = other_analyzer.function_returns[orig_name]
+        if orig_name in other_analyzer.function_update_keys:
+            self.function_update_keys[alias_name] = other_analyzer.function_update_keys[orig_name]
+        if orig_name in other_analyzer.function_input_keys:
+            self.function_input_keys[alias_name] = other_analyzer.function_input_keys[orig_name]
 
 class SetEntryPointTransformer(cst.CSTTransformer):
     def __init__(self, target_id: str, graph_var: str):
@@ -840,7 +1062,7 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
                     ),
                     args=[
                         cst.Arg(cst.SimpleString(f'"{source}"')),
-                        cst.Arg(cst.Name(router_fn)),
+                        cst.Arg(cst.parse_expression(router_fn)),
                         cst.Arg(mapping_dict)
                     ]
                 )
@@ -850,8 +1072,8 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
 
     new_body = list(module.body)
     
-    # 3. Check if router_fn exists, if not add a skeleton
-    if router_fn not in analyzer.functions:
+    # 3. Check if router_fn exists, if not and it's a valid identifier, add a skeleton
+    if router_fn.isidentifier() and router_fn not in analyzer.functions:
         first_key = list(mapping.keys())[0] if mapping else "next"
         router_def = cst.FunctionDef(
             name=cst.Name(router_fn),
