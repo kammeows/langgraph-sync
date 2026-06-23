@@ -29,7 +29,12 @@ dagreGraph.setDefaultEdgeLabel(() => ({}));
 const nodeWidth = 172;
 const nodeHeight = 36;
 
-const getLayoutedElements = (nodes, edges, savedPositions = {}, direction = "TB") => {
+const getLayoutedElements = (
+  nodes,
+  edges,
+  savedPositions = {},
+  direction = "TB",
+) => {
   const isHorizontal = direction === "LR";
   dagreGraph.setGraph({ rankdir: direction, nodesep: 70, ranksep: 100 });
 
@@ -98,7 +103,8 @@ function App() {
   const [copilotMessages, setCopilotMessages] = useState([
     {
       sender: "copilot",
-      content: "Hello! I'm your LangGraph Autopilot. Ask me to make structural graph changes, like adding/renaming nodes, or connecting them together.",
+      content:
+        "Hello! I'm your LangGraph Autopilot. Ask me to make structural graph changes, like adding/renaming nodes, or connecting them together.",
     },
   ]);
   const [copilotInput, setCopilotInput] = useState("");
@@ -117,7 +123,10 @@ function App() {
       if (!sidebarRef.current) return;
       const rect = sidebarRef.current.getBoundingClientRect();
       const relativeY = e.clientY - rect.top;
-      const percentage = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
+      const percentage = Math.max(
+        0,
+        Math.min(100, (relativeY / rect.height) * 100),
+      );
       setEditorHeightPercent(percentage);
     };
 
@@ -145,54 +154,52 @@ function App() {
         if (data && data.length > 0) {
           setGraphsList(data);
           const savedGraphId = localStorage.getItem("selected-graph-id");
-          const hasSavedGraph = savedGraphId && data.some(g => g.id === savedGraphId);
+          const hasSavedGraph =
+            savedGraphId && data.some((g) => g.id === savedGraphId);
           setSelectedGraphId(hasSavedGraph ? savedGraphId : data[0].id);
         }
       })
       .catch(console.error);
   }, []);
 
-  const selectLinesInEditor = useCallback(
-    (node) => {
-      if (!node || !editorRef.current) return;
-      if (node.data && node.data.lines) {
-        const [startLine, endLine] = node.data.lines;
-        console.log(`Highlighting lines ${startLine} to ${endLine}`);
-        editorRef.current.revealLineInCenter(startLine);
-        const model = editorRef.current.getModel();
-        if (!model) return;
-        const maxColumn = model.getLineMaxColumn(endLine);
-        editorRef.current.setSelection({
-          startLineNumber: startLine,
-          startColumn: 1,
-          endLineNumber: endLine,
-          endColumn: maxColumn,
-        });
-      } else if (node.data && node.data.functionName) {
-        const model = editorRef.current.getModel();
-        if (!model) return;
-        const matches = model.findMatches(
-          `def ${node.data.functionName}`,
-          true,
-          false,
-          true,
-          null,
-          true,
-        );
-        if (matches.length > 0) {
-          const match = matches[0];
-          editorRef.current.revealLineInCenter(match.range.startLineNumber);
-          editorRef.current.setSelection(match.range);
-        }
+  const selectLinesInEditor = useCallback((node) => {
+    if (!node || !editorRef.current) return;
+    if (node.data && node.data.lines) {
+      const [startLine, endLine] = node.data.lines;
+      console.log(`Highlighting lines ${startLine} to ${endLine}`);
+      editorRef.current.revealLineInCenter(startLine);
+      const model = editorRef.current.getModel();
+      if (!model) return;
+      const maxColumn = model.getLineMaxColumn(endLine);
+      editorRef.current.setSelection({
+        startLineNumber: startLine,
+        startColumn: 1,
+        endLineNumber: endLine,
+        endColumn: maxColumn,
+      });
+    } else if (node.data && node.data.functionName) {
+      const model = editorRef.current.getModel();
+      if (!model) return;
+      const matches = model.findMatches(
+        `def ${node.data.functionName}`,
+        true,
+        false,
+        true,
+        null,
+        true,
+      );
+      if (matches.length > 0) {
+        const match = matches[0];
+        editorRef.current.revealLineInCenter(match.range.startLineNumber);
+        editorRef.current.setSelection(match.range);
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   const handleEditorDidMount = (editor) => {
     editorRef.current = editor;
     if (selectedGraphId && nodes.length > 0) {
-      const selectedNode = nodes.find(n => n.selected);
+      const selectedNode = nodes.find((n) => n.selected);
       if (selectedNode) {
         selectLinesInEditor(selectedNode);
         highlightedGraphIdRef.current = selectedGraphId;
@@ -252,11 +259,13 @@ function App() {
           type: node.type,
           onDelete: (id) => {
             if (id === "__start__") return;
-            handlersRef.current?.onDeleteNode && handlersRef.current.onDeleteNode(id);
+            handlersRef.current?.onDeleteNode &&
+              handlersRef.current.onDeleteNode(id);
           },
           onRename: (id, label) => {
             if (id === "__start__" || id === "__end__") return;
-            handlersRef.current?.onRenameNode && handlersRef.current.onRenameNode(id, label);
+            handlersRef.current?.onRenameNode &&
+              handlersRef.current.onRenameNode(id, label);
           },
         },
       }));
@@ -289,7 +298,8 @@ function App() {
             isConditional,
             label: edge.label || (isConditional ? "Conditional Edge" : ""),
             onDelete: (id) => {
-              handlersRef.current?.onDeleteEdge && handlersRef.current.onDeleteEdge(id);
+              handlersRef.current?.onDeleteEdge &&
+                handlersRef.current.onDeleteEdge(id);
             },
             onRenameLabel: onRenameEdgeLabel,
             onUpdateData: onUpdateEdgeData,
@@ -302,14 +312,17 @@ function App() {
       rawGraphDataRef.current = data;
 
       const savedPositions = selectedGraphId
-        ? (JSON.parse(localStorage.getItem(`node-positions-${selectedGraphId}`)) || {})
+        ? JSON.parse(
+            localStorage.getItem(`node-positions-${selectedGraphId}`),
+          ) || {}
         : {};
 
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        nodesWithHandlers,
-        edgesWithHandlers,
-        savedPositions
-      );
+      const { nodes: layoutedNodes, edges: layoutedEdges } =
+        getLayoutedElements(
+          nodesWithHandlers,
+          edgesWithHandlers,
+          savedPositions,
+        );
 
       const savedSelectedNodeId = selectedGraphId
         ? localStorage.getItem(`selected-node-${selectedGraphId}`)
@@ -321,12 +334,12 @@ function App() {
       }));
 
       // Ensure markerEnd is preserved or re-applied
-      const finalEdges = layoutedEdges.map(e => ({
-          ...e,
-          markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: e.source === "__start__" ? "#22c55e" : "#b1b1b7"
-          }
+      const finalEdges = layoutedEdges.map((e) => ({
+        ...e,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: e.source === "__start__" ? "#22c55e" : "#b1b1b7",
+        },
       }));
 
       setNodes(finalNodes);
@@ -338,45 +351,80 @@ function App() {
         setStateSchema(data.state_schema);
       }
     },
-    [onRenameEdgeLabel, onUpdateEdgeData, setNodes, setEdges, setWarnings, setStateSchema, showEdgeLabels, selectedGraphId],
+    [
+      onRenameEdgeLabel,
+      onUpdateEdgeData,
+      setNodes,
+      setEdges,
+      setWarnings,
+      setStateSchema,
+      showEdgeLabels,
+      selectedGraphId,
+    ],
   );
 
-  const handleSendCopilotMessage = useCallback(async (textToPost) => {
-    const text = textToPost || copilotInput;
-    if (!text.trim() || !selectedGraphId) return;
+  const handleSendCopilotMessage = useCallback(
+    async (textToPost) => {
+      const text = textToPost || copilotInput;
+      if (!text.trim() || !selectedGraphId) return;
 
-    setCopilotMessages(prev => [...prev, { sender: 'user', content: text }]);
-    if (!textToPost) setCopilotInput("");
-    setIsCopilotLoading(true);
+      setCopilotMessages((prev) => [
+        ...prev,
+        { sender: "user", content: text },
+      ]);
+      if (!textToPost) setCopilotInput("");
+      setIsCopilotLoading(true);
 
-    try {
-      const response = await fetch("http://localhost:8000/api/copilot/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text, graph_id: selectedGraphId }),
-      });
+      try {
+        const response = await fetch("http://localhost:8000/api/copilot/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: text, graph_id: selectedGraphId }),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setCopilotMessages(prev => [...prev, { sender: 'copilot', content: data.message }]);
-          if (data.graph) {
-            if (data.graph.code !== undefined) setCode(data.graph.code);
-            processGraphStateInternal(data.graph);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setCopilotMessages((prev) => [
+              ...prev,
+              { sender: "copilot", content: data.message },
+            ]);
+            if (data.graph) {
+              if (data.graph.code !== undefined) setCode(data.graph.code);
+              processGraphStateInternal(data.graph);
+            }
+          } else {
+            setCopilotMessages((prev) => [
+              ...prev,
+              { sender: "copilot", content: data.message, isError: true },
+            ]);
           }
         } else {
-          setCopilotMessages(prev => [...prev, { sender: 'copilot', content: data.message, isError: true }]);
+          setCopilotMessages((prev) => [
+            ...prev,
+            {
+              sender: "copilot",
+              content: "Failed to connect to the Copilot service.",
+              isError: true,
+            },
+          ]);
         }
-      } else {
-        setCopilotMessages(prev => [...prev, { sender: 'copilot', content: "Failed to connect to the Copilot service.", isError: true }]);
+      } catch (error) {
+        console.error("Copilot error:", error);
+        setCopilotMessages((prev) => [
+          ...prev,
+          {
+            sender: "copilot",
+            content: "Error connecting to AI Copilot: " + error.message,
+            isError: true,
+          },
+        ]);
+      } finally {
+        setIsCopilotLoading(false);
       }
-    } catch (error) {
-      console.error("Copilot error:", error);
-      setCopilotMessages(prev => [...prev, { sender: 'copilot', content: "Error connecting to AI Copilot: " + error.message, isError: true }]);
-    } finally {
-      setIsCopilotLoading(false);
-    }
-  }, [copilotInput, selectedGraphId, setCode, processGraphStateInternal]);
+    },
+    [copilotInput, selectedGraphId, setCode, processGraphStateInternal],
+  );
 
   // 4. Backend-Calling Handlers
 
@@ -436,7 +484,11 @@ function App() {
       const edge = edges.find((e) => e.id === id);
       if (!edge) return;
 
-      if (!window.confirm(`Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`)) {
+      if (
+        !window.confirm(
+          `Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`,
+        )
+      ) {
         return;
       }
 
@@ -468,10 +520,17 @@ function App() {
     async (deletedEdges) => {
       const activeNodeIds = new Set(nodes.map((n) => n.id));
       for (const edge of deletedEdges) {
-        if (!activeNodeIds.has(edge.source) || !activeNodeIds.has(edge.target)) {
+        if (
+          !activeNodeIds.has(edge.source) ||
+          !activeNodeIds.has(edge.target)
+        ) {
           continue;
         }
-        if (!window.confirm(`Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`)) {
+        if (
+          !window.confirm(
+            `Are you sure you want to delete the edge from "${edge.source}" to "${edge.target}"?`,
+          )
+        ) {
           // Restore local edge state from backend
           fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
             .then((res) => res.json())
@@ -480,17 +539,20 @@ function App() {
           continue;
         }
         try {
-          const response = await fetch("http://localhost:8000/api/graph/mutate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "delete_edge",
-              source: edge.source,
-              target: edge.target,
-              payload: { condition: edge.data?.condition },
-              graph_id: selectedGraphId,
-            }),
-          });
+          const response = await fetch(
+            "http://localhost:8000/api/graph/mutate",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "delete_edge",
+                source: edge.source,
+                target: edge.target,
+                payload: { condition: edge.data?.condition },
+                graph_id: selectedGraphId,
+              }),
+            },
+          );
           if (response.ok) {
             const data = await response.json();
             if (data.code !== undefined) setCode(data.code);
@@ -510,7 +572,9 @@ function App() {
         if (node.id === "__start__" || node.id === "__end__") {
           continue;
         }
-        if (!window.confirm(`Are you sure you want to delete node "${node.id}"?`)) {
+        if (
+          !window.confirm(`Are you sure you want to delete node "${node.id}"?`)
+        ) {
           // Restore local node state from backend
           fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
             .then((res) => res.json())
@@ -519,15 +583,18 @@ function App() {
           continue;
         }
         try {
-          const response = await fetch("http://localhost:8000/api/graph/mutate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "delete_node",
-              node_id: node.id,
-              graph_id: selectedGraphId,
-            }),
-          });
+          const response = await fetch(
+            "http://localhost:8000/api/graph/mutate",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "delete_node",
+                node_id: node.id,
+                graph_id: selectedGraphId,
+              }),
+            },
+          );
           if (response.ok) {
             const data = await response.json();
             if (data.code !== undefined) setCode(data.code);
@@ -538,19 +605,24 @@ function App() {
         }
       }
     },
-    [selectedGraphId, processGraphStateInternal, setCode]
+    [selectedGraphId, processGraphStateInternal, setCode],
   );
 
   const onConnect = useCallback(
     async (params) => {
       console.log("Connect params:", params);
-      
+
       // Prevent connections to/from virtual sub-tool nodes
       const sourceNode = nodes.find((n) => n.id === params.source);
       const targetNode = nodes.find((n) => n.id === params.target);
-      
-      if (sourceNode?.type === "subToolNode" || targetNode?.type === "subToolNode") {
-        alert("You cannot manually connect to or from virtual sub-tool nodes. These are inferred from function calls in your code.");
+
+      if (
+        sourceNode?.type === "subToolNode" ||
+        targetNode?.type === "subToolNode"
+      ) {
+        alert(
+          "You cannot manually connect to or from virtual sub-tool nodes. These are inferred from function calls in your code.",
+        );
         return;
       }
 
@@ -597,34 +669,71 @@ function App() {
       const response = await fetch("http://localhost:8000/api/graph/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_node", new_id: validName, graph_id: selectedGraphId }),
+        body: JSON.stringify({
+          action: "add_node",
+          new_id: validName,
+          graph_id: selectedGraphId,
+        }),
       });
       if (response.ok) {
         const data = await response.json();
         if (data.code !== undefined) setCode(data.code);
         processGraphStateInternal(data);
+      } else if (response.status === 409) {
+        const errData = await response.json();
+        if (window.confirm(errData.detail || "Implementation already exists. Add this node and tie it to the current implementation?")) {
+          // Retry with use_existing: true
+          const retryResponse = await fetch("http://localhost:8000/api/graph/mutate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "add_node",
+              new_id: validName,
+              graph_id: selectedGraphId,
+              payload: { use_existing: true },
+            }),
+          });
+          if (retryResponse.ok) {
+            const data = await retryResponse.json();
+            if (data.code !== undefined) setCode(data.code);
+            processGraphStateInternal(data);
+          } else {
+            const finalErr = await retryResponse.json();
+            alert(finalErr.detail || "Failed to add node.");
+          }
+        }
+      } else {
+        const errData = await response.json();
+        alert(errData.detail || "Failed to add node.");
       }
     } catch (error) {
       console.error("Add node failed:", error);
     }
   }, [processGraphStateInternal, setCode, selectedGraphId]);
 
-  const onAddConditionalEdge = useCallback(async (payload) => {
-    try {
-      const response = await fetch("http://localhost:8000/api/graph/mutate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_conditional_edge", payload, graph_id: selectedGraphId }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.code !== undefined) setCode(data.code);
-        processGraphStateInternal(data);
+  const onAddConditionalEdge = useCallback(
+    async (payload) => {
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "add_conditional_edge",
+            payload,
+            graph_id: selectedGraphId,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphStateInternal(data);
+        }
+      } catch (error) {
+        console.error("Add conditional edge failed:", error);
       }
-    } catch (error) {
-      console.error("Add conditional edge failed:", error);
-    }
-  }, [processGraphStateInternal, setCode, selectedGraphId]);
+    },
+    [processGraphStateInternal, setCode, selectedGraphId],
+  );
 
   // Keep the handlers ref updated
   useEffect(() => {
@@ -640,7 +749,7 @@ function App() {
   useEffect(() => {
     if (!selectedGraphId) return;
     localStorage.setItem("selected-graph-id", selectedGraphId);
-    
+
     // Reset viewport and highlight restoration flags for the new graph
     restoredGraphIdRef.current = null;
     highlightedGraphIdRef.current = null;
@@ -682,7 +791,7 @@ function App() {
     if (!editorRef.current || !selectedGraphId || nodes.length === 0) return;
     if (highlightedGraphIdRef.current === selectedGraphId) return;
 
-    const selectedNode = nodes.find(n => n.selected);
+    const selectedNode = nodes.find((n) => n.selected);
     if (selectedNode) {
       selectLinesInEditor(selectedNode);
     }
@@ -698,7 +807,7 @@ function App() {
           ...edge.data,
           showLabels: showEdgeLabels,
         },
-      }))
+      })),
     );
   }, [showEdgeLabels, setEdges]);
 
@@ -723,21 +832,30 @@ function App() {
     }, 800);
   };
 
-  const onSelectionChange = useCallback(({ nodes: selectedNodes }) => {
-    if (!selectedGraphId) return;
-    const selectedNode = selectedNodes.find(n => n.selected);
-    if (selectedNode) {
-      localStorage.setItem(`selected-node-${selectedGraphId}`, selectedNode.id);
-    } else {
-      localStorage.removeItem(`selected-node-${selectedGraphId}`);
-    }
-  }, [selectedGraphId]);
+  const onSelectionChange = useCallback(
+    ({ nodes: selectedNodes }) => {
+      if (!selectedGraphId) return;
+      const selectedNode = selectedNodes.find((n) => n.selected);
+      if (selectedNode) {
+        localStorage.setItem(
+          `selected-node-${selectedGraphId}`,
+          selectedNode.id,
+        );
+      } else {
+        localStorage.removeItem(`selected-node-${selectedGraphId}`);
+      }
+    },
+    [selectedGraphId],
+  );
 
   const onMoveEnd = useCallback(() => {
     if (!selectedGraphId) return;
     try {
       const viewport = getViewport();
-      localStorage.setItem(`viewport-${selectedGraphId}`, JSON.stringify(viewport));
+      localStorage.setItem(
+        `viewport-${selectedGraphId}`,
+        JSON.stringify(viewport),
+      );
     } catch (e) {
       console.error("Error getting viewport:", e);
     }
@@ -750,7 +868,10 @@ function App() {
       currentNodes.forEach((n) => {
         positions[n.id] = n.position;
       });
-      localStorage.setItem(`node-positions-${selectedGraphId}`, JSON.stringify(positions));
+      localStorage.setItem(
+        `node-positions-${selectedGraphId}`,
+        JSON.stringify(positions),
+      );
       return currentNodes;
     });
   }, [selectedGraphId, setNodes]);
@@ -762,7 +883,7 @@ function App() {
     localStorage.removeItem(`viewport-${selectedGraphId}`);
 
     // Clear selection state in nodes
-    setNodes((nds) => nds.map(n => ({ ...n, selected: false })));
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
 
     if (rawGraphDataRef.current) {
       processGraphStateInternal(rawGraphDataRef.current);
@@ -793,36 +914,45 @@ function App() {
         )}
         <div className="controls-container">
           {graphsList.length > 0 && (
-            <select 
-              value={selectedGraphId} 
+            <select
+              value={selectedGraphId}
               onChange={(e) => setSelectedGraphId(e.target.value)}
               className="graph-selector"
-              style={{ padding: "6px", borderRadius: "4px", marginRight: "10px", backgroundColor: "#2d2d2d", color: "white", border: "1px solid #444" }}
+              style={{
+                padding: "6px",
+                borderRadius: "4px",
+                marginRight: "10px",
+                backgroundColor: "#2d2d2d",
+                color: "white",
+                border: "1px solid #444",
+              }}
             >
-              {graphsList.map(g => (
-                <option key={g.id} value={g.id}>{g.id} ({g.file})</option>
+              {graphsList.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.id} ({g.file})
+                </option>
               ))}
             </select>
           )}
           <button className="add-node-btn" onClick={addNode}>
             + Add Node
           </button>
-          <button 
-            className="add-node-btn" 
+          <button
+            className="add-node-btn"
             style={{ backgroundColor: "#8b5cf6" }}
             onClick={() => setIsCondModalOpen(true)}
           >
             + Add Conditional Route
           </button>
-          <button 
-            className="add-node-btn" 
+          <button
+            className="add-node-btn"
             style={{ backgroundColor: showEdgeLabels ? "#10b981" : "#4b5563" }}
             onClick={() => setShowEdgeLabels(!showEdgeLabels)}
           >
             {showEdgeLabels ? "👁️ Hide Edge Labels" : "👁️ Show Edge Labels"}
           </button>
-          <button 
-            className="add-node-btn" 
+          <button
+            className="add-node-btn"
             style={{ backgroundColor: "#e11d48" }}
             onClick={handleResetLayout}
           >
@@ -855,14 +985,14 @@ function App() {
             className="upload-btn"
             onClick={() => document.getElementById("code-upload-input").click()}
           >
-            📁 Upload Code
+            Upload Code
           </button>
-          <button 
-            className="add-node-btn" 
+          <button
+            className="add-node-btn"
             style={{ backgroundColor: "#0284c7" }}
             onClick={() => setIsPRModalOpen(true)}
           >
-            🚀 Create Pull Request
+            Create Pull Request
           </button>
           <input
             type="file"
@@ -919,27 +1049,27 @@ function App() {
         <StateSchemaPanel schema={stateSchema} />
       </div>
 
-      <div 
+      <div
         ref={sidebarRef}
         className={`editor-sidebar ${isEditorCollapsed ? "collapsed" : ""}`}
       >
         <div className="sidebar-panel-container">
           {/* 1. Source Code Panel */}
-          <div 
+          <div
             className="editor-panel"
             style={
-              editorHeightPercent === 0 
-                ? { display: 'none' } 
-                : editorHeightPercent === 100 
-                  ? { height: '100%' } 
+              editorHeightPercent === 0
+                ? { display: "none" }
+                : editorHeightPercent === 100
+                  ? { height: "100%" }
                   : { height: `${editorHeightPercent}%` }
             }
           >
             <div className="editor-header">
               <span>Source Code</span>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: "flex", gap: "8px" }}>
                 {editorHeightPercent < 100 && (
-                  <button 
+                  <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(100)}
                     title="Maximize Code Editor"
@@ -948,7 +1078,7 @@ function App() {
                   </button>
                 )}
                 {editorHeightPercent > 0 && editorHeightPercent < 100 && (
-                  <button 
+                  <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(0)}
                     title="Collapse Code Editor"
@@ -958,7 +1088,10 @@ function App() {
                 )}
               </div>
             </div>
-            <div className="monaco-editor-wrapper" style={{ height: 'calc(100% - 40px)' }}>
+            <div
+              className="monaco-editor-wrapper"
+              style={{ height: "calc(100% - 40px)" }}
+            >
               <Editor
                 height="100%"
                 language="python"
@@ -980,28 +1113,28 @@ function App() {
 
           {/* 2. Draggable Divider */}
           {editorHeightPercent > 0 && editorHeightPercent < 100 && (
-            <div 
-              className={`sidebar-divider ${isResizing ? 'dragging' : ''}`}
+            <div
+              className={`sidebar-divider ${isResizing ? "dragging" : ""}`}
               onMouseDown={handleDividerMouseDown}
             />
           )}
 
           {/* 3. AI Copilot Panel */}
-          <div 
+          <div
             className="copilot-panel"
             style={
-              editorHeightPercent === 100 
-                ? { display: 'none' } 
-                : editorHeightPercent === 0 
-                  ? { height: '100%' } 
+              editorHeightPercent === 100
+                ? { display: "none" }
+                : editorHeightPercent === 0
+                  ? { height: "100%" }
                   : { height: `${100 - editorHeightPercent}%` }
             }
           >
             <div className="editor-header">
               <span>🤖 AI Copilot</span>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: "flex", gap: "8px" }}>
                 {editorHeightPercent > 0 && (
-                  <button 
+                  <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(0)}
                     title="Maximize AI Copilot"
@@ -1010,7 +1143,7 @@ function App() {
                   </button>
                 )}
                 {editorHeightPercent < 100 && editorHeightPercent > 0 && (
-                  <button 
+                  <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(100)}
                     title="Collapse AI Copilot"
@@ -1019,7 +1152,7 @@ function App() {
                   </button>
                 )}
                 {editorHeightPercent !== 50 && (
-                  <button 
+                  <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(50)}
                     title="Split 50/50"
@@ -1032,9 +1165,9 @@ function App() {
             <div className="copilot-chat-container">
               <div className="copilot-messages">
                 {copilotMessages.map((msg, index) => (
-                  <div 
-                    key={index} 
-                    className={`copilot-message ${msg.sender} ${msg.isError ? 'error' : ''}`}
+                  <div
+                    key={index}
+                    className={`copilot-message ${msg.sender} ${msg.isError ? "error" : ""}`}
                   >
                     {msg.content}
                   </div>
@@ -1048,45 +1181,61 @@ function App() {
                 )}
                 <div ref={messagesEndRef} />
               </div>
-              
+
               <div className="copilot-input-area">
                 <div className="copilot-suggestions">
-                  <button 
+                  <button
                     className="suggestion-chip"
-                    onClick={() => handleSendCopilotMessage("Add a node called database_lookup")}
+                    onClick={() =>
+                      handleSendCopilotMessage(
+                        "Add a node called database_lookup",
+                      )
+                    }
                   >
                     ➕ Add node 'database_lookup'
                   </button>
-                  <button 
+                  <button
                     className="suggestion-chip"
-                    onClick={() => handleSendCopilotMessage("Connect router_v2 to tool")}
+                    onClick={() =>
+                      handleSendCopilotMessage("Connect router_v2 to tool")
+                    }
                   >
                     🔗 Connect 'router_v2' to 'tool'
                   </button>
-                  <button 
+                  <button
                     className="suggestion-chip"
-                    onClick={() => handleSendCopilotMessage("Rename researcherss to researcher")}
+                    onClick={() =>
+                      handleSendCopilotMessage(
+                        "Rename researcherss to researcher",
+                      )
+                    }
                   >
                     📝 Rename 'researcherss'
                   </button>
-                  <button 
+                  <button
                     className="suggestion-chip"
-                    onClick={() => handleSendCopilotMessage("Modify prompt inside research_agent")}
+                    onClick={() =>
+                      handleSendCopilotMessage(
+                        "Modify prompt inside research_agent",
+                      )
+                    }
                   >
                     ⚠️ Test business logic block
                   </button>
                 </div>
                 <div className="copilot-input-wrapper">
-                  <input 
+                  <input
                     type="text"
                     className="copilot-input"
                     placeholder="Ask copilot to change graph structure..."
                     value={copilotInput}
                     onChange={(e) => setCopilotInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendCopilotMessage()}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleSendCopilotMessage()
+                    }
                     disabled={isCopilotLoading}
                   />
-                  <button 
+                  <button
                     className="copilot-send-btn"
                     onClick={() => handleSendCopilotMessage()}
                     disabled={isCopilotLoading || !copilotInput.trim()}
@@ -1100,17 +1249,14 @@ function App() {
         </div>
       </div>
 
-      <ConditionalRouteModal 
+      <ConditionalRouteModal
         isOpen={isCondModalOpen}
         onClose={() => setIsCondModalOpen(false)}
         onAdd={onAddConditionalEdge}
         nodes={nodes}
       />
 
-      <PRModal 
-        isOpen={isPRModalOpen}
-        onClose={() => setIsPRModalOpen(false)}
-      />
+      <PRModal isOpen={isPRModalOpen} onClose={() => setIsPRModalOpen(false)} />
     </div>
   );
 }

@@ -54,6 +54,35 @@ graph = builder.compile()
         self.assertIn("def database_lookup(state: AgentState):", mutated_code)
         self.assertIn('builder.add_node("database_lookup", database_lookup)', mutated_code)
 
+    def test_add_node_mutation_existing_function(self):
+        from fastapi import HTTPException
+        # Base code with my_custom_agent function defined but not added to graph
+        code_with_existing_fn = self.base_code + "\n\ndef my_custom_agent(state: AgentState):\n    return state\n"
+        
+        # 1. Calling add_node without use_existing should raise 409 HTTPException
+        with self.assertRaises(HTTPException) as context:
+            apply_mutation_to_source(code_with_existing_fn, "add_node", new_id="my_custom_agent")
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertIn("already implemented in the code", context.exception.detail)
+
+        # 2. Calling add_node with use_existing=True payload should succeed and NOT add duplicate function def
+        mutated_code = apply_mutation_to_source(
+            code_with_existing_fn, 
+            "add_node", 
+            new_id="my_custom_agent", 
+            payload={"use_existing": True}
+        )
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify the node is added to graph registry
+        self.assertIn("my_custom_agent", analyzer.nodes)
+        
+        # Verify there is exactly one function definition of my_custom_agent (not duplicated)
+        self.assertEqual(mutated_code.count("def my_custom_agent"), 1)
+        self.assertIn('builder.add_node("my_custom_agent", my_custom_agent)', mutated_code)
+
     def test_rename_node_mutation(self):
         # Run mutation: rename "agent" -> "researcher"
         mutated_code = apply_mutation_to_source(self.base_code, "rename", node_id="agent", new_id="researcher")

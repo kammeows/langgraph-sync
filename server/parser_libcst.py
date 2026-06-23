@@ -960,7 +960,7 @@ class GraphCallInserter(cst.CSTTransformer):
             return node.with_changes(body=new_body)
         return node
 
-def add_node_to_code(source_code: str, node_name: str) -> str:
+def add_node_to_code(source_code: str, node_name: str, only_add_call: bool = False) -> str:
     module = cst.parse_module(source_code)
     
     analyzer = LangGraphAnalyzer()
@@ -970,30 +970,6 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
     state_name = analyzer.state_class_name or "AgentState"
     graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
 
-    func_def = cst.FunctionDef(
-        name=cst.Name(node_name),
-        params=cst.Parameters(
-            params=[
-                cst.Param(
-                    name=cst.Name("state"),
-                    annotation=cst.Annotation(annotation=cst.Name(state_name))
-                )
-            ]
-        ),
-        body=cst.IndentedBlock(
-            body=[
-                cst.SimpleStatementLine(
-                    body=[
-                        cst.Return(
-                            value=cst.Dict(elements=[])
-                        )
-                    ]
-                )
-            ]
-        ),
-        leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
-    )
-    
     call_stmt = cst.SimpleStatementLine(
         body=[
             cst.Expr(
@@ -1011,29 +987,56 @@ def add_node_to_code(source_code: str, node_name: str) -> str:
         ]
     )
 
-    new_body = list(module.body)
-    
-    # We will inject the function definition at the module level.
-    # To find the best place, we can put it right before the function that defines the graph, 
-    # or just before the graph assignment if global.
-    insert_idx = -1
-    for i, stmt in enumerate(new_body):
-        # Look for the graph assignment globally
-        if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name(graph_var))])])):
-            insert_idx = i
-            break
-        # Or look for a function that contains it
-        if m.matches(stmt, m.FunctionDef()) and any("StateGraph" in cst.parse_module("").code_for_node(stmt) for _ in [1]):
-            # Simple heuristic
-            insert_idx = i
-            break
+    if not only_add_call:
+        func_def = cst.FunctionDef(
+            name=cst.Name(node_name),
+            params=cst.Parameters(
+                params=[
+                    cst.Param(
+                        name=cst.Name("state"),
+                        annotation=cst.Annotation(annotation=cst.Name(state_name))
+                    )
+                ]
+            ),
+            body=cst.IndentedBlock(
+                body=[
+                    cst.SimpleStatementLine(
+                        body=[
+                            cst.Return(
+                                value=cst.Dict(elements=[])
+                            )
+                        ]
+                    )
+                ]
+            ),
+            leading_lines=[cst.EmptyLine(indent=False), cst.EmptyLine(indent=False)]
+        )
+        
+        new_body = list(module.body)
+        
+        # We will inject the function definition at the module level.
+        # To find the best place, we can put it right before the function that defines the graph, 
+        # or just before the graph assignment if global.
+        insert_idx = -1
+        for i, stmt in enumerate(new_body):
+            # Look for the graph assignment globally
+            if m.matches(stmt, m.SimpleStatementLine(body=[m.Assign(targets=[m.AssignTarget(target=m.Name(graph_var))])])):
+                insert_idx = i
+                break
+            # Or look for a function that contains it
+            if m.matches(stmt, m.FunctionDef()) and any("StateGraph" in cst.parse_module("").code_for_node(stmt) for _ in [1]):
+                # Simple heuristic
+                insert_idx = i
+                break
 
-    if insert_idx != -1:
-        new_body.insert(insert_idx, func_def)
+        if insert_idx != -1:
+            new_body.insert(insert_idx, func_def)
+        else:
+            new_body.append(func_def)
+
+        new_module = module.with_changes(body=new_body)
     else:
-        new_body.append(func_def)
-
-    new_module = module.with_changes(body=new_body)
+        new_module = module
 
     # Now inject the add_node call inside the correct block
     inserter = GraphCallInserter(call_stmt, graph_var, "add_node")

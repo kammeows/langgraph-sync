@@ -225,16 +225,25 @@ def apply_mutation_to_source(
         existing_nodes = set(analyzer.nodes.keys())
         existing_functions = set(analyzer.functions)
 
+        only_add_call = False
         if new_id:
-            if new_id in existing_nodes or new_id in existing_functions:
-                raise HTTPException(status_code=400, detail=f"Name '{new_id}' already exists.")
+            if new_id in existing_nodes:
+                raise HTTPException(status_code=400, detail=f"Node '{new_id}' already exists in the graph.")
+            if new_id in existing_functions:
+                use_existing = payload.get("use_existing", False) if payload else False
+                if not use_existing:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Function '{new_id}' is already implemented in the code. Do you want to add this node back and tie it to the current implementation?"
+                    )
+                only_add_call = True
             new_node_id = new_id
         else:
             index = 1
             while f"node{index}" in existing_nodes: index += 1
             new_node_id = f"node{index}"
         
-        return add_node_to_code(source_code, new_node_id)
+        return add_node_to_code(source_code, new_node_id, only_add_call=only_add_call)
     
     elif action == "delete_node":
         module = cst.parse_module(source_code)
