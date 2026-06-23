@@ -743,8 +743,15 @@ class RemoveNodeTransformer(cst.CSTTransformer):
         # 3. any_graph.add_conditional_edges("node_id", ...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
             call = updated_node.body[0].value
+            # Check source node match
             if len(call.args) >= 1 and isinstance(call.args[0].value, cst.SimpleString):
                 if call.args[0].value.evaluated_value == self.node_id:
+                    return cst.RemoveFromParent()
+            
+            # Check if mapping dictionary became empty
+            if len(call.args) >= 3 and isinstance(call.args[2].value, cst.Dict):
+                mapping_dict = call.args[2].value
+                if len(mapping_dict.elements) == 0:
                     return cst.RemoveFromParent()
 
         # 4. any_graph.set_entry_point("node_id")
@@ -758,7 +765,13 @@ class RemoveNodeTransformer(cst.CSTTransformer):
 
     def leave_DictElement(self, original_node: cst.DictElement, updated_node: cst.DictElement):
         # Remove entry from mapping if it's a target
+        match_target = False
         if isinstance(updated_node.value, cst.SimpleString) and updated_node.value.evaluated_value == self.node_id:
+            match_target = True
+        elif isinstance(updated_node.value, cst.Name) and updated_node.value.value == "END" and self.node_id == "__end__":
+            match_target = True
+            
+        if match_target:
             return cst.RemoveFromParent()
         return updated_node
 
@@ -1049,6 +1062,108 @@ def add_node_to_code(source_code: str, node_name: str, only_add_call: bool = Fal
 
     return final_module.code
 
+class MergeConditionalEdgeTransformer(cst.CSTTransformer):
+    def __init__(self, graph_var: str, source: str, router_fn: str, new_mapping: dict):
+        self.graph_var = graph_var
+        self.source = source
+        self.router_fn = router_fn
+        self.new_mapping = new_mapping
+        self.merged = False
+
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine):
+        if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name(self.graph_var), attr=m.Name("add_conditional_edges"))))])):
+            expr = updated_node.body[0]
+            call = expr.value
+            if len(call.args) >= 3:
+                arg0 = call.args[0].value
+                arg1 = call.args[1].value
+                arg2 = call.args[2].value
+                
+                match_src = False
+                if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.source:
+                    match_src = True
+                elif isinstance(arg0, cst.Name) and arg0.value == "START" and self.source == "__start__":
+                    match_src = True
+                
+                router_code = cst.parse_module("").code_for_node(arg1).strip()
+                if match_src and router_code == self.router_fn:
+                    if isinstance(arg2, cst.Dict):
+                        existing_items = []
+                        for el in arg2.elements:
+                            if isinstance(el, cst.DictElement):
+                                k_val = el.key.evaluated_value if isinstance(el.key, cst.SimpleString) else cst.parse_module("").code_for_node(el.key).strip()
+                                
+                                if isinstance(el.value, cst.SimpleString):
+                                    v_val = el.value.evaluated_value
+                                elif isinstance(el.value, cst.Name) and el.value.value == "END":
+                                    v_val = "__end__"
+                                else:
+                                    v_val = cst.parse_module("").code_for_node(el.value).strip()
+                                
+                                existing_items.append({
+                                    "key": k_val,
+                                    "target": v_val
+                                })
+                        
+                        updated_existing_indices = set()
+                        new_entries_to_add = []
+                        
+                        for new_key, new_target in self.new_mapping.items():
+                            matched = False
+                            # 1. Match by key first
+                            for idx, item in enumerate(existing_items):
+                                if item["key"] == new_key:
+                                    item["target"] = new_target
+                                    updated_existing_indices.add(idx)
+                                    matched = True
+                                    break
+                            
+                            if matched:
+                                continue
+                                
+                            # 2. Match by target to handle key renames/updates
+                            for idx, item in enumerate(existing_items):
+                                if idx not in updated_existing_indices and item["target"] == new_target:
+                                    item["key"] = new_key
+                                    updated_existing_indices.add(idx)
+                                    matched = True
+                                    break
+                                    
+                            if not matched:
+                                new_entries_to_add.append((new_key, new_target))
+                                
+                        existing_mappings = []
+                        for idx, item in enumerate(existing_items):
+                            k = item["key"]
+                            v = item["target"]
+                            
+                            k_code = k if (k.startswith('"') or k.startswith("'")) else f'"{k}"'
+                            if v == "__end__" or v == "END":
+                                v_code = "END"
+                            elif v.startswith('"') or v.startswith("'"):
+                                v_code = v
+                            else:
+                                v_code = f'"{v}"'
+                            existing_mappings.append((k_code, v_code))
+                            
+                        for new_key, new_target in new_entries_to_add:
+                            k_code = f'"{new_key}"'
+                            v_code = "END" if new_target == "__end__" else f'"{new_target}"'
+                            existing_mappings.append((k_code, v_code))
+                        
+                        self.merged = True
+                        dict_str = "{\n"
+                        for k, v in existing_mappings:
+                            dict_str += f'    {k}: {v},\n'
+                        dict_str += "}"
+                        updated_dict = cst.parse_expression(dict_str)
+                        
+                        updated_args = list(call.args)
+                        updated_args[2] = call.args[2].with_changes(value=updated_dict)
+                        updated_call = call.with_changes(args=updated_args)
+                        return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
+        return updated_node
+
 def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:
     module = cst.parse_module(source_code)
     
@@ -1059,41 +1174,9 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
     state_name = analyzer.state_class_name or "AgentState"
     graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
 
-    # 1. Create mapping dictionary
-    dict_elements = []
-    for key, val in mapping.items():
-        val_node = cst.Name("END") if val == "__end__" else cst.SimpleString(f'"{val}"')
-        dict_elements.append(
-            cst.DictElement(
-                key=cst.SimpleString(f'"{key}"'),
-                value=val_node
-            )
-        )
-    
-    mapping_dict = cst.Dict(elements=dict_elements)
-    
-    # 2. Create graph_var.add_conditional_edges call
-    cond_stmt = cst.SimpleStatementLine(
-        body=[
-            cst.Expr(
-                value=cst.Call(
-                    func=cst.Attribute(
-                        value=cst.Name(graph_var),
-                        attr=cst.Name("add_conditional_edges")
-                    ),
-                    args=[
-                        cst.Arg(cst.SimpleString(f'"{source}"')),
-                        cst.Arg(cst.parse_expression(router_fn)),
-                        cst.Arg(mapping_dict)
-                    ]
-                )
-            )
-        ]
-    )
-
     new_body = list(module.body)
     
-    # 3. Check if router_fn exists, if not and it's a valid identifier, add a skeleton
+    # 1. Check if router_fn exists, if not and it's a valid identifier, add a skeleton
     if router_fn.isidentifier() and router_fn not in analyzer.functions:
         first_key = list(mapping.keys())[0] if mapping else "next"
         router_def = cst.FunctionDef(
@@ -1136,7 +1219,40 @@ def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, 
 
     new_module = module.with_changes(body=new_body)
 
-    # 4. Insert the add_conditional_edges call
+    # 2. Try to merge into an existing add_conditional_edges call first
+    merger = MergeConditionalEdgeTransformer(graph_var, source, router_fn, mapping)
+    final_module = new_module.visit(merger)
+    
+    if merger.merged:
+        return final_module.code
+
+    # 3. Create mapping dictionary and new add_conditional_edges call
+    dict_str = "{\n"
+    for key, val in mapping.items():
+        val_str = "END" if val == "__end__" else f'"{val}"'
+        dict_str += f'    "{key}": {val_str},\n'
+    dict_str += "}"
+    mapping_dict = cst.parse_expression(dict_str)
+    
+    cond_stmt = cst.SimpleStatementLine(
+        body=[
+            cst.Expr(
+                value=cst.Call(
+                    func=cst.Attribute(
+                        value=cst.Name(graph_var),
+                        attr=cst.Name("add_conditional_edges")
+                    ),
+                    args=[
+                        cst.Arg(cst.SimpleString(f'"{source}"')),
+                        cst.Arg(cst.parse_expression(router_fn)),
+                        cst.Arg(mapping_dict)
+                    ]
+                )
+            )
+        ]
+    )
+
+    # 4. Insert the new add_conditional_edges call
     inserter = GraphCallInserter(cond_stmt, graph_var, "add_conditional_edges")
     final_module = new_module.visit(inserter)
     
