@@ -92,9 +92,14 @@ class SyncRequest(BaseModel):
     code: str
     graph_id: Optional[str] = None
 
+class ChatMessage(BaseModel):
+    sender: str
+    content: str
+
 class CopilotChatRequest(BaseModel):
     query: str
     graph_id: str
+    history: Optional[List[ChatMessage]] = None
 
 def parse_code_to_graph(source_code: str, graph_id: Optional[str] = None):
 
@@ -355,7 +360,11 @@ async def copilot_chat(request: CopilotChatRequest):
 
     # Run the copilot chat via LLM service module
     try:
-        result = await run_copilot_chat(request.query, nodes_summary, edges_summary)
+        history_list = []
+        if request.history:
+            for item in request.history:
+                history_list.append({"sender": item.sender, "content": item.content})
+        result = await run_copilot_chat(request.query, nodes_summary, edges_summary, history_list)
     except HTTPException:
         raise
     except Exception as e:

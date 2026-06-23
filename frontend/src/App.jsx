@@ -379,7 +379,11 @@ function App() {
         const response = await fetch("http://localhost:8000/api/copilot/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: text, graph_id: selectedGraphId }),
+          body: JSON.stringify({
+            query: text,
+            graph_id: selectedGraphId,
+            history: copilotMessages,
+          }),
         });
 
         if (response.ok) {

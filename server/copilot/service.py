@@ -22,17 +22,29 @@ def load_system_instruction() -> str:
             "You translate user requests into sequences of graph mutations."
         )
 
-async def run_copilot_chat(query: str, nodes_summary: List[Dict[str, Any]], edges_summary: List[Dict[str, Any]]) -> Any:
+async def run_copilot_chat(query: str, nodes_summary: List[Dict[str, Any]], edges_summary: List[Dict[str, Any]], history: Optional[List[Dict[str, str]]] = None) -> Any:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="GEMINI_API_KEY environment variable is not set in backend.")
     
+    history_str = ""
+    if history:
+        history_str = "Conversation history (context of previous user requests and your responses):\n"
+        for msg in history:
+            role = "User" if msg.get("sender") == "user" else "Copilot"
+            content = msg.get("content", "")
+            # Skip long code blocks or system errors in history to keep context clean
+            if len(content) > 500:
+                content = content[:500] + "..."
+            history_str += f"{role}: {content}\n"
+        history_str += "\n"
+
     prompt = f"""
 Current graph context (nodes and edges):
 Nodes: {json.dumps(nodes_summary)}
 Edges: {json.dumps(edges_summary)}
 
-User Request: {query}
+{history_str}User Request: {query}
 """
     system_instruction = load_system_instruction()
 
