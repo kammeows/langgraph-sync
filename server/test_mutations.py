@@ -1,0 +1,148 @@
+import unittest
+import os
+import sys
+import libcst as cst
+
+# Add workspace root and server directory to system path
+workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(workspace_root)
+sys.path.append(os.path.join(workspace_root, "server"))
+
+try:
+    from server import apply_mutation_to_source
+    from parser_libcst import LangGraphAnalyzer
+except ImportError:
+    from server.server import apply_mutation_to_source
+    from server.parser_libcst import LangGraphAnalyzer
+
+class TestASTMutations(unittest.TestCase):
+
+    def setUp(self):
+        # Base template code for state graph testing
+        self.base_code = """from langgraph.graph import StateGraph, END
+from typing import TypedDict
+
+class AgentState(TypedDict):
+    query: str
+
+def my_agent(state: AgentState):
+    return {"query": state["query"]}
+
+builder = StateGraph(AgentState)
+builder.add_node("agent", my_agent)
+builder.set_entry_point("agent")
+builder.add_edge("agent", END)
+graph = builder.compile()
+"""
+
+    def _get_analyzer_for_code(self, code: str) -> LangGraphAnalyzer:
+        module = cst.parse_module(code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+        analyzer = LangGraphAnalyzer(target_var="graph")
+        wrapper.visit(analyzer)
+        return analyzer
+
+    def test_add_node_mutation(self):
+        # Run mutation
+        mutated_code = apply_mutation_to_source(self.base_code, "add_node", new_id="database_lookup")
+        
+        # Parse mutated code and analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify the new node is registered and function is created
+        self.assertIn("database_lookup", analyzer.nodes)
+        self.assertIn("def database_lookup(state: AgentState):", mutated_code)
+        self.assertIn('builder.add_node("database_lookup", database_lookup)', mutated_code)
+
+    def test_rename_node_mutation(self):
+        # Run mutation: rename "agent" -> "researcher"
+        mutated_code = apply_mutation_to_source(self.base_code, "rename", node_id="agent", new_id="researcher")
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify renamed nodes and edges
+        self.assertNotIn("agent", analyzer.nodes)
+        self.assertIn("researcher", analyzer.nodes)
+        self.assertEqual(analyzer.entry_point, "researcher")
+        self.assertIn(("researcher", "__end__"), analyzer.edges)
+        self.assertNotIn(("agent", "__end__"), analyzer.edges)
+
+    def test_add_edge_mutation(self):
+        # Setup: add another node first
+        code_with_two_nodes = apply_mutation_to_source(self.base_code, "add_node", new_id="tool")
+        
+        # Run mutation: connect "agent" -> "tool"
+        mutated_code = apply_mutation_to_source(code_with_two_nodes, "add_edge", source="agent", target="tool")
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify edge exists
+        self.assertIn(("agent", "tool"), analyzer.edges)
+
+    def test_delete_edge_mutation(self):
+        # Run mutation: delete the static edge "agent" -> END (represented as "__end__" in analyzer)
+        mutated_code = apply_mutation_to_source(self.base_code, "delete_edge", source="agent", target="__end__")
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify edge is gone
+        self.assertNotIn(("agent", "__end__"), analyzer.edges)
+
+    def test_delete_node_mutation(self):
+        # Setup code with multiple nodes and edges
+        code = self.base_code
+        code = apply_mutation_to_source(code, "add_node", new_id="tool")
+        code = apply_mutation_to_source(code, "add_edge", source="agent", target="tool")
+        
+        # Run mutation: delete the node "tool"
+        mutated_code = apply_mutation_to_source(code, "delete_node", node_id="tool")
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify the node is deleted
+        self.assertNotIn("tool", analyzer.nodes)
+        # Verify the attached edge "agent" -> "tool" is also automatically deleted
+        self.assertNotIn(("agent", "tool"), analyzer.edges)
+
+    def test_add_conditional_edge_mutation(self):
+        # Setup: add a second node "tool" first
+        code = apply_mutation_to_source(self.base_code, "add_node", new_id="tool")
+        
+        # Payload for conditional edge
+        payload = {
+            "router_fn": "my_router",
+            "mapping": {
+                "go_to_tool": "tool",
+                "go_to_end": "__end__"
+            }
+        }
+        
+        # Run mutation: add conditional edge from "agent"
+        mutated_code = apply_mutation_to_source(
+            code, 
+            "add_conditional_edge", 
+            source="agent", 
+            payload=payload
+        )
+        
+        # Analyze
+        analyzer = self._get_analyzer_for_code(mutated_code)
+        
+        # Verify conditional edges exist in analyzer metadata
+        self.assertEqual(len(analyzer.conditional_edges), 1)
+        cond_edge = analyzer.conditional_edges[0]
+        self.assertEqual(cond_edge["source"], "agent")
+        self.assertEqual(cond_edge["router"], "my_router")
+        self.assertEqual(cond_edge["mapping"]["go_to_tool"], "tool")
+        self.assertEqual(cond_edge["mapping"]["go_to_end"], "__end__")
+
+        # Verify the generated function code exists
+        self.assertIn("def my_router(state: AgentState):", mutated_code)
+        self.assertIn('builder.add_conditional_edges("agent", my_router,', mutated_code)
+
+if __name__ == "__main__":
+    unittest.main()
