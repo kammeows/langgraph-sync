@@ -73,11 +73,12 @@ def get_graph_file_path(graph_id: str):
     if not selected:
         selected = graphs[0]
     
-    # Resolve relative to workspace root
     file_path = selected["file"]
+    if os.path.isabs(file_path) or file_path.startswith("/") or file_path.startswith("\\"):
+        return os.path.normpath(file_path)
     if file_path.startswith("./"):
         file_path = file_path[2:]
-    return os.path.join(WORKSPACE_ROOT, file_path)
+    return os.path.normpath(os.path.join(WORKSPACE_ROOT, file_path))
 
 class MutationRequest(BaseModel):
     action: str

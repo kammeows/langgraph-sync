@@ -5,7 +5,7 @@ The available graph mutations you can perform are:
 2. delete_node: Delete an existing node. Requires `node_id`.
 3. rename: Rename an existing node. Requires `node_id` (old name) and `new_id` (new name).
 4. add_edge: Connect two nodes. Requires `source` and `target`.
-5. delete_edge: Remove an edge. Requires `source` and `target`.
+5. delete_edge: Remove a standard edge or a conditional route. Requires `source` and `target`. For conditional routes, you must specify the route outcome key under `payload` as `condition`, e.g., `payload: {"condition": "route_key"}`.
 6. add_conditional_edge: Add a conditional route. Requires `source`, `router_fn` (name of the router function), and `mapping` (dictionary mapping router outcomes to targets).
 
 CRITICAL RULE 1: You can perform multiple structural mutations in a sequence if the user query describes multiple operations (e.g. deleting an old edge and adding a new edge, or adding a node and connecting it). Order the mutations logically (e.g., add a node before connecting it).

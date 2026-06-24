@@ -161,5 +161,17 @@ graph = builder.compile()
             self.assertTrue(data["success"])
             self.assertEqual(data["pr_url"], "https://github.com/owner/repo/pull/1")
 
+    def test_get_graph_file_path_absolute(self):
+        # Mock get_available_graphs to return an absolute path
+        mock_graphs = [{
+            "id": "absolute_test",
+            "file": "C:/projects/my_project/agent.py" if os.name == 'nt' else "/projects/my_project/agent.py",
+            "var": "graph"
+        }]
+        with patch.object(target_module, "get_available_graphs", return_value=mock_graphs):
+            resolved_path = target_module.get_graph_file_path("absolute_test")
+            expected = "C:\\projects\\my_project\\agent.py" if os.name == 'nt' else "/projects/my_project/agent.py"
+            self.assertEqual(resolved_path, expected)
+
 if __name__ == "__main__":
     unittest.main()

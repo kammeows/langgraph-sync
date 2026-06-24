@@ -685,18 +685,26 @@ function App() {
         processGraphStateInternal(data);
       } else if (response.status === 409) {
         const errData = await response.json();
-        if (window.confirm(errData.detail || "Implementation already exists. Add this node and tie it to the current implementation?")) {
+        if (
+          window.confirm(
+            errData.detail ||
+              "Implementation already exists. Add this node and tie it to the current implementation?",
+          )
+        ) {
           // Retry with use_existing: true
-          const retryResponse = await fetch("http://localhost:8000/api/graph/mutate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "add_node",
-              new_id: validName,
-              graph_id: selectedGraphId,
-              payload: { use_existing: true },
-            }),
-          });
+          const retryResponse = await fetch(
+            "http://localhost:8000/api/graph/mutate",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "add_node",
+                new_id: validName,
+                graph_id: selectedGraphId,
+                payload: { use_existing: true },
+              }),
+            },
+          );
           if (retryResponse.ok) {
             const data = await retryResponse.json();
             if (data.code !== undefined) setCode(data.code);
@@ -1135,7 +1143,7 @@ function App() {
             }
           >
             <div className="editor-header">
-              <span>🤖 AI Copilot</span>
+              <span>AI Copilot</span>
               <div style={{ display: "flex", gap: "8px" }}>
                 {editorHeightPercent > 0 && (
                   <button
