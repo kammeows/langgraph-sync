@@ -1,0 +1,56 @@
+{
+  "name": "langgraph-sync",
+  "displayName": "LangGraph Sync Visual Builder",
+  "description": "A two-way visual editor and AST code-generator for LangGraph.",
+  "version": "0.0.1",
+  "publisher": "kammeows",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "langgraph-sync.openVisualBuilder",
+        "title": "LangGraph: Open Visual Builder"
+      },
+      {
+        "command": "langgraph-sync.stopVisualBuilder",
+        "title": "LangGraph: Stop Visual Builder Server"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "langgraph-sync.openVisualBuilder",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LangGraph Sync",
+      "properties": {
+        "langgraph-sync.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the Python executable with dependencies like libcst and fastapi installed."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.18",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}
