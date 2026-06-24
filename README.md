@@ -1,6 +1,6 @@
 # LangGraph Sync: Interactive Developer Canvas & AST Editor for LangGraph
 
-`LangGraph Sync` is an interactive web tool designed for visualizing, editing and bidirectionally synchronizing LangGraph workflows in real time. By combining a **React Flow Visual Canvas** and a **Monaco Code Editor** with a **FastAPI LibCST AST Parser**, this tool allows developers to modify graph structures visually or via code, validating correctness and exporting changes safely.
+`LangGraph Sync` is an interactive web tool designed for visualizing, editing and bidirectionally synchronizing LangGraph workflows in real time. By combining a **React Flow Visual Canvas** and a **Monaco Code Editor** with a **FastAPI LibCST AST Parser**, this tool allows developers to modify graph structures visually or via code validating correctness and exporting changes safely.
 
 ---
 
@@ -42,14 +42,6 @@
 
 ## Architectural Overview
 
-```mermaid
-graph TD
-    UI[React Flow Visual Canvas] <--->|WebSockets / REST API| Server[FastAPI Backend]
-    Server <--->|LibCST AST Engine| Parser[parser_libcst.py]
-    Parser <--->|Recursive Imports| Imports[Local Workspace Files]
-    Server --->|Git Status / Diff / Create-PR| Git[Git Service & GitHub REST API]
-```
-
 ### File Structure
 
 - **`server/`**: FastAPI backend service
@@ -67,6 +59,8 @@ graph TD
 ---
 
 ## Step-by-Step Setup Guide
+
+You can also simply download the VSIX file in the root folder as an alternative. Take a look at the README_EXTENSION.md for more info.
 
 ### 1. Prerequisites
 
