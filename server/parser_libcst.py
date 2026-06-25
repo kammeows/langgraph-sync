@@ -62,6 +62,12 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.graph_var_names = set()
         self._potential_builders = set()
         
+        self.scope_nodes = {}
+        self.scope_edges = {}
+        self.scope_conditional_edges = {}
+        self.scope_entry_points = {}
+        self.target_scope = None
+        
         self.current_file_path = current_file_path
         self.visited_files = visited_files if visited_files is not None else set()
         self.workspace_root = workspace_root
@@ -105,6 +111,23 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         return name_str
 
     def visit_Assign(self, node: cst.Assign):
+        # Track target scope when target_var is assigned
+        if self.target_var:
+            is_target_var_assignment = False
+            for target in node.targets:
+                if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
+                    is_target_var_assignment = True
+                    break
+            
+            if is_target_var_assignment:
+                if isinstance(node.value, cst.Call):
+                    raw_callable = extract_callable_name(node.value)
+                    if raw_callable:
+                        if isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
+                            self.target_scope = self._current_function
+                        else:
+                            self.target_scope = raw_callable
+
         # Detect create_agent or create_react_agent
         is_prebuilt_agent = False
         func_name = None
@@ -139,11 +162,18 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 self.nodes["agent"] = "agent"
                 self.nodes["tools"] = "ToolNode"
                 self.edges.append(("tools", "agent"))
-                self.conditional_edges.append({
+                cond_dict = {
                     "source": "agent",
                     "router": "tools_condition",
                     "mapping": {"tools": "tools", "__end__": "__end__"}
-                })
+                }
+                self.conditional_edges.append(cond_dict)
+
+                self.scope_entry_points[self._current_function] = "agent"
+                self.scope_nodes.setdefault(self._current_function, {})["agent"] = "agent"
+                self.scope_nodes.setdefault(self._current_function, {})["tools"] = "ToolNode"
+                self.scope_edges.setdefault(self._current_function, []).append(("tools", "agent"))
+                self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
 
         # Detect StateGraph(AgentState)
         elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
@@ -386,6 +416,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
                     if node_name and function_name:
                         self.nodes[node_name] = function_name
+                        self.scope_nodes.setdefault(self._current_function, {})[node_name] = function_name
 
                 # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
@@ -397,14 +428,17 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     if src_val and dst_val:
                         if src_val == "__start__":
                             self.entry_point = dst_val
+                            self.scope_entry_points[self._current_function] = dst_val
                         else:
                             self.edges.append((src_val, dst_val))
+                            self.scope_edges.setdefault(self._current_function, []).append((src_val, dst_val))
 
                 # set_entry_point
                 elif method_name == "set_entry_point" and len(node.args) >= 1:
                     arg0 = node.args[0].value
                     if isinstance(arg0, cst.SimpleString):
                         self.entry_point = arg0.evaluated_value
+                        self.scope_entry_points[self._current_function] = arg0.evaluated_value
 
                 # add_conditional_edges
                 elif method_name == "add_conditional_edges" and len(node.args) >= 2:
@@ -429,11 +463,13 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     if not mapping and router_fn == "tools_condition":
                         mapping = {"tools": "tools", "__end__": "__end__"}
 
-                    self.conditional_edges.append({
+                    cond_dict = {
                         "source": source,
                         "router": router_fn,
                         "mapping": mapping
-                    })
+                    }
+                    self.conditional_edges.append(cond_dict)
+                    self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
 
     def leave_Module(self, original_node: cst.Module):
         # Fallback for builders
@@ -542,6 +578,27 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     for ret in self.function_returns[router]:
                         if ret:
                             cond["mapping"][ret] = ret
+
+        # Resolve target scope if it's not explicitly set by assignment
+        if not self.target_scope:
+            # Fallback: if there's only one scope with nodes, use that as target scope
+            active_scopes = [s for s, nds in self.scope_nodes.items() if nds]
+            if len(active_scopes) == 1:
+                self.target_scope = active_scopes[0]
+            else:
+                self.target_scope = None  # Default to global scope
+        else:
+            # If target_scope was set to a callable name, check if it's actually a local function
+            # If it's not a local function (e.g. create_agent, which is imported), we should use self.target_scope = None
+            if self.target_scope not in self.functions:
+                self.target_scope = None
+
+        # Apply target scope filtering
+        if self.target_scope is not None or any(self.target_scope in d for d in (self.scope_nodes, self.scope_edges, self.scope_conditional_edges, self.scope_entry_points)):
+            self.nodes = self.scope_nodes.get(self.target_scope, {})
+            self.edges = self.scope_edges.get(self.target_scope, [])
+            self.conditional_edges = self.scope_conditional_edges.get(self.target_scope, [])
+            self.entry_point = self.scope_entry_points.get(self.target_scope, None)
 
     def _merge_function_meta(self, orig_name: str, alias_name: str, other_analyzer):
         if alias_name not in self.functions:
