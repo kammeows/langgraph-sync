@@ -129,7 +129,7 @@ async function setupPrivateVenv(context: vscode.ExtensionContext): Promise<strin
     // Check if venv python and key packages are already installed and working
     if (fs.existsSync(venvPython)) {
         try {
-            const check = child_process.spawnSync(venvPython, ['-c', 'import libcst, fastapi, uvicorn, requests, google.genai'], { encoding: 'utf8' });
+            const check = child_process.spawnSync(venvPython, ['-c', 'import libcst, fastapi, uvicorn, requests, google.genai, multipart'], { encoding: 'utf8' });
             if (check.status === 0) {
                 console.log(`Private venv verified successfully: ${venvPython}`);
                 return venvPython;
@@ -183,8 +183,8 @@ async function setupPrivateVenv(context: vscode.ExtensionContext): Promise<strin
                 throw new Error(detailedError || 'Unknown venv creation failure');
             }
 
-            progress.report({ message: "Installing backend libraries (libcst, fastapi, uvicorn, requests, google-genai)..." });
-            const installResult = child_process.spawnSync(venvPython, ['-m', 'pip', 'install', 'libcst', 'fastapi', 'uvicorn', 'python-dotenv', 'requests', 'google-genai'], { cwd: globalStoragePath });
+            progress.report({ message: "Installing backend libraries (libcst, fastapi, uvicorn, requests, google-genai, python-multipart)..." });
+            const installResult = child_process.spawnSync(venvPython, ['-m', 'pip', 'install', 'libcst', 'fastapi', 'uvicorn', 'python-dotenv', 'requests', 'google-genai', 'python-multipart'], { cwd: globalStoragePath });
             if (installResult.status !== 0) {
                 const stderr = installResult.stderr?.toString();
                 const stdout = installResult.stdout?.toString();

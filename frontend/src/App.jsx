@@ -148,7 +148,7 @@ function App() {
   }, [copilotMessages, isCopilotLoading]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/graphs")
+    fetch("http://localhost:8001/api/graphs")
       .then((res) => res.json())
       .then((data) => {
         if (data && data.length > 0) {
@@ -376,7 +376,7 @@ function App() {
       setIsCopilotLoading(true);
 
       try {
-        const response = await fetch("http://localhost:8000/api/copilot/chat", {
+        const response = await fetch("http://localhost:8001/api/copilot/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -435,7 +435,7 @@ function App() {
   const onRenameNode = useCallback(
     async (id, newLabel) => {
       try {
-        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        const response = await fetch("http://localhost:8001/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -462,7 +462,7 @@ function App() {
       if (!window.confirm(`Are you sure you want to delete node "${id}"?`))
         return;
       try {
-        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        const response = await fetch("http://localhost:8001/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -497,7 +497,7 @@ function App() {
       }
 
       try {
-        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        const response = await fetch("http://localhost:8001/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -536,7 +536,7 @@ function App() {
           )
         ) {
           // Restore local edge state from backend
-          fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
+          fetch(`http://localhost:8001/api/graph?graph_id=${selectedGraphId}`)
             .then((res) => res.json())
             .then((data) => processGraphStateInternal(data))
             .catch(console.error);
@@ -544,7 +544,7 @@ function App() {
         }
         try {
           const response = await fetch(
-            "http://localhost:8000/api/graph/mutate",
+            "http://localhost:8001/api/graph/mutate",
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -580,7 +580,7 @@ function App() {
           !window.confirm(`Are you sure you want to delete node "${node.id}"?`)
         ) {
           // Restore local node state from backend
-          fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
+          fetch(`http://localhost:8001/api/graph?graph_id=${selectedGraphId}`)
             .then((res) => res.json())
             .then((data) => processGraphStateInternal(data))
             .catch(console.error);
@@ -588,7 +588,7 @@ function App() {
         }
         try {
           const response = await fetch(
-            "http://localhost:8000/api/graph/mutate",
+            "http://localhost:8001/api/graph/mutate",
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -640,7 +640,7 @@ function App() {
       }
 
       try {
-        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        const response = await fetch("http://localhost:8001/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -670,7 +670,7 @@ function App() {
     if (!nodeName) return;
     const validName = nodeName.trim().replace(/\s+/g, "_");
     try {
-      const response = await fetch("http://localhost:8000/api/graph/mutate", {
+      const response = await fetch("http://localhost:8001/api/graph/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -693,7 +693,7 @@ function App() {
         ) {
           // Retry with use_existing: true
           const retryResponse = await fetch(
-            "http://localhost:8000/api/graph/mutate",
+            "http://localhost:8001/api/graph/mutate",
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -726,7 +726,7 @@ function App() {
   const onAddConditionalEdge = useCallback(
     async (payload) => {
       try {
-        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+        const response = await fetch("http://localhost:8001/api/graph/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -766,7 +766,7 @@ function App() {
     restoredGraphIdRef.current = null;
     highlightedGraphIdRef.current = null;
 
-    fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`)
+    fetch(`http://localhost:8001/api/graph?graph_id=${selectedGraphId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.code !== undefined) setCode(data.code);
@@ -829,7 +829,7 @@ function App() {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/graph/sync", {
+        const response = await fetch("http://localhost:8001/api/graph/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code: value, graph_id: selectedGraphId }),
@@ -1017,7 +1017,7 @@ function App() {
               const formData = new FormData();
               formData.append("file", file);
               const res = await fetch(
-                "http://localhost:8000/api/graph/upload",
+                "http://localhost:8001/api/graph/upload",
                 { method: "POST", body: formData },
               );
               if (res.ok) {

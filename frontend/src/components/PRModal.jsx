@@ -30,11 +30,11 @@ const PRModal = ({ isOpen, onClose }) => {
     setLoading(true);
     setError(null);
     try {
-      const statusRes = await fetch("http://localhost:8000/api/git/status");
+      const statusRes = await fetch("http://localhost:8001/api/git/status");
       const statusData = await statusRes.json();
       setStatus(statusData);
 
-      const diffRes = await fetch("http://localhost:8000/api/git/diff");
+      const diffRes = await fetch("http://localhost:8001/api/git/diff");
       const diffData = await diffRes.json();
       setDiff(diffData.diff || "");
     } catch (err) {
@@ -54,10 +54,12 @@ const PRModal = ({ isOpen, onClose }) => {
 
     setSubmitting(true);
     setError(null);
-    setSubmitStatus("Creating branch, staging, committing and pushing to remote...");
+    setSubmitStatus(
+      "Creating branch, staging, committing and pushing to remote...",
+    );
 
     try {
-      const response = await fetch("http://localhost:8000/api/git/create-pr", {
+      const response = await fetch("http://localhost:8001/api/git/create-pr", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -89,7 +91,9 @@ const PRModal = ({ isOpen, onClose }) => {
       <div className="pr-modal-content">
         <div className="pr-modal-header">
           <h3>🚀 Submit Changes to GitHub PR</h3>
-          <button type="button" className="close-x-btn" onClick={onClose}>×</button>
+          <button type="button" className="close-x-btn" onClick={onClose}>
+            ×
+          </button>
         </div>
 
         {loading ? (
@@ -101,12 +105,22 @@ const PRModal = ({ isOpen, onClose }) => {
           <div className="pr-modal-success">
             <div className="success-icon">🎉</div>
             <h4>Pull Request Created Successfully!</h4>
-            <p className="success-msg">Your changes have been pushed to a remote branch and a PR has been opened.</p>
-            <a href={prUrl} target="_blank" rel="noopener noreferrer" className="view-pr-link">
+            <p className="success-msg">
+              Your changes have been pushed to a remote branch and a PR has been
+              opened.
+            </p>
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="view-pr-link"
+            >
               View Pull Request on GitHub ↗
             </a>
             <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={onClose}>Close</button>
+              <button type="button" className="cancel-btn" onClick={onClose}>
+                Close
+              </button>
             </div>
           </div>
         ) : (
@@ -120,13 +134,21 @@ const PRModal = ({ isOpen, onClose }) => {
             {status && (
               <div className="git-repo-info">
                 <span className="repo-badge">
-                  📍 Branch: <strong>{status.active_branch || "unknown"}</strong>
+                  📍 Branch:{" "}
+                  <strong>{status.active_branch || "unknown"}</strong>
                 </span>
                 <span className="repo-badge">
-                  📦 Repo: <strong>{status.repo_owner}/{status.repo_name}</strong>
+                  📦 Repo:{" "}
+                  <strong>
+                    {status.repo_owner}/{status.repo_name}
+                  </strong>
                 </span>
-                <span className={`status-badge ${status.is_clean ? 'clean' : 'dirty'}`}>
-                  {status.is_clean ? "✓ Workspace Clean" : "⚠ Workspace Modified"}
+                <span
+                  className={`status-badge ${status.is_clean ? "clean" : "dirty"}`}
+                >
+                  {status.is_clean
+                    ? "✓ Workspace Clean"
+                    : "⚠ Workspace Modified"}
                 </span>
               </div>
             )}
@@ -134,7 +156,9 @@ const PRModal = ({ isOpen, onClose }) => {
             {status && status.is_clean ? (
               <div className="pr-empty-warning">
                 <p>No local changes detected in your workspace repository.</p>
-                <p className="hint">Make some graph or code modifications first to submit a PR!</p>
+                <p className="hint">
+                  Make some graph or code modifications first to submit a PR!
+                </p>
               </div>
             ) : (
               <>
@@ -172,7 +196,10 @@ const PRModal = ({ isOpen, onClose }) => {
                           let className = "diff-line";
                           if (line.startsWith("+") && !line.startsWith("+++")) {
                             className += " diff-add";
-                          } else if (line.startsWith("-") && !line.startsWith("---")) {
+                          } else if (
+                            line.startsWith("-") &&
+                            !line.startsWith("---")
+                          ) {
                             className += " diff-del";
                           } else if (line.startsWith("@@")) {
                             className += " diff-header";
@@ -200,7 +227,12 @@ const PRModal = ({ isOpen, onClose }) => {
             )}
 
             <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={onClose} disabled={submitting}>
+              <button
+                type="button"
+                className="cancel-btn"
+                onClick={onClose}
+                disabled={submitting}
+              >
                 Cancel
               </button>
               <button
