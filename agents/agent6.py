@@ -69,10 +69,10 @@ def build_workflow(checkpointer=None):
         # If the latest message (result) from leo is a tool call -> tools_condition routes to tools
         # If the latest message (result) from leo is a not a tool call -> tools_condition routes to END
         tools_condition,
-        {
-            "tools": "tools",
-            "__end__": END,
-        }
+        # {
+        #     "tools": "tools",
+        #     "__end__": END,
+        # }
     )
     builder.add_edge("tools", "leo")
     react_graph = builder.compile()

@@ -39,7 +39,7 @@ def LocalGuardrails(*args, **kwargs):
 load_dotenv()
 
 # Load configuration
-config = Config()
+config = Config
 
 # Initialize memory
 memory = MemorySaver()

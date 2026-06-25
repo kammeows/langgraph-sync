@@ -105,8 +105,48 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         return name_str
 
     def visit_Assign(self, node: cst.Assign):
+        # Detect create_agent or create_react_agent
+        is_prebuilt_agent = False
+        func_name = None
+        if isinstance(node.value, cst.Call):
+            if isinstance(node.value.func, cst.Name):
+                func_name = node.value.func.value
+            elif isinstance(node.value.func, cst.Attribute) and isinstance(node.value.func.attr, cst.Name):
+                func_name = node.value.func.attr.value
+            
+            if func_name in ("create_agent", "create_react_agent"):
+                is_prebuilt_agent = True
+
+        if is_prebuilt_agent:
+            # Check target matches target_var
+            is_target = False
+            for target in node.targets:
+                if isinstance(target.target, cst.Name) and (not self.target_var or target.target.value == self.target_var):
+                    is_target = True
+                    break
+            
+            if is_target:
+                state_schema_val = None
+                for arg in node.value.args:
+                    if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
+                        if isinstance(arg.value, cst.Name):
+                            state_schema_val = arg.value.value
+                
+                if state_schema_val:
+                    self.state_class_name = state_schema_val
+                
+                self.entry_point = "agent"
+                self.nodes["agent"] = "agent"
+                self.nodes["tools"] = "ToolNode"
+                self.edges.append(("tools", "agent"))
+                self.conditional_edges.append({
+                    "source": "agent",
+                    "router": "tools_condition",
+                    "mapping": {"tools": "tools", "__end__": "__end__"}
+                })
+
         # Detect StateGraph(AgentState)
-        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
+        elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
             for target in node.targets:
                 if isinstance(target.target, cst.Name):
                     var_name = target.target.value
@@ -385,6 +425,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                 val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
                                 if key and val:
                                     mapping[key] = val
+
+                    if not mapping and router_fn == "tools_condition":
+                        mapping = {"tools": "tools", "__end__": "__end__"}
 
                     self.conditional_edges.append({
                         "source": source,
@@ -1074,10 +1117,9 @@ class MergeConditionalEdgeTransformer(cst.CSTTransformer):
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name(self.graph_var), attr=m.Name("add_conditional_edges"))))])):
             expr = updated_node.body[0]
             call = expr.value
-            if len(call.args) >= 3:
+            if len(call.args) >= 2:
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
-                arg2 = call.args[2].value
                 
                 match_src = False
                 if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.source:
@@ -1087,81 +1129,86 @@ class MergeConditionalEdgeTransformer(cst.CSTTransformer):
                 
                 router_code = cst.parse_module("").code_for_node(arg1).strip()
                 if match_src and router_code == self.router_fn:
-                    if isinstance(arg2, cst.Dict):
-                        existing_items = []
-                        for el in arg2.elements:
-                            if isinstance(el, cst.DictElement):
-                                k_val = el.key.evaluated_value if isinstance(el.key, cst.SimpleString) else cst.parse_module("").code_for_node(el.key).strip()
-                                
-                                if isinstance(el.value, cst.SimpleString):
-                                    v_val = el.value.evaluated_value
-                                elif isinstance(el.value, cst.Name) and el.value.value == "END":
-                                    v_val = "__end__"
-                                else:
-                                    v_val = cst.parse_module("").code_for_node(el.value).strip()
-                                
-                                existing_items.append({
-                                    "key": k_val,
-                                    "target": v_val
-                                })
-                        
-                        updated_existing_indices = set()
-                        new_entries_to_add = []
-                        
-                        for new_key, new_target in self.new_mapping.items():
-                            matched = False
-                            # 1. Match by key first
-                            for idx, item in enumerate(existing_items):
-                                if item["key"] == new_key:
-                                    item["target"] = new_target
-                                    updated_existing_indices.add(idx)
-                                    matched = True
-                                    break
-                            
-                            if matched:
-                                continue
-                                
-                            # 2. Match by target to handle key renames/updates
-                            for idx, item in enumerate(existing_items):
-                                if idx not in updated_existing_indices and item["target"] == new_target:
-                                    item["key"] = new_key
-                                    updated_existing_indices.add(idx)
-                                    matched = True
-                                    break
+                    existing_items = []
+                    if len(call.args) >= 3:
+                        arg2 = call.args[2].value
+                        if isinstance(arg2, cst.Dict):
+                            for el in arg2.elements:
+                                if isinstance(el, cst.DictElement):
+                                    k_val = el.key.evaluated_value if isinstance(el.key, cst.SimpleString) else cst.parse_module("").code_for_node(el.key).strip()
                                     
-                            if not matched:
-                                new_entries_to_add.append((new_key, new_target))
-                                
-                        existing_mappings = []
+                                    if isinstance(el.value, cst.SimpleString):
+                                        v_val = el.value.evaluated_value
+                                    elif isinstance(el.value, cst.Name) and el.value.value == "END":
+                                        v_val = "__end__"
+                                    else:
+                                        v_val = cst.parse_module("").code_for_node(el.value).strip()
+                                    
+                                    existing_items.append({
+                                        "key": k_val,
+                                        "target": v_val
+                                    })
+                        
+                    updated_existing_indices = set()
+                    new_entries_to_add = []
+                    
+                    for new_key, new_target in self.new_mapping.items():
+                        matched = False
+                        # 1. Match by key first
                         for idx, item in enumerate(existing_items):
-                            k = item["key"]
-                            v = item["target"]
-                            
-                            k_code = k if (k.startswith('"') or k.startswith("'")) else f'"{k}"'
-                            if v == "__end__" or v == "END":
-                                v_code = "END"
-                            elif v.startswith('"') or v.startswith("'"):
-                                v_code = v
-                            else:
-                                v_code = f'"{v}"'
-                            existing_mappings.append((k_code, v_code))
-                            
-                        for new_key, new_target in new_entries_to_add:
-                            k_code = f'"{new_key}"'
-                            v_code = "END" if new_target == "__end__" else f'"{new_target}"'
-                            existing_mappings.append((k_code, v_code))
+                            if item["key"] == new_key:
+                                item["target"] = new_target
+                                updated_existing_indices.add(idx)
+                                matched = True
+                                break
                         
-                        self.merged = True
-                        dict_str = "{\n"
-                        for k, v in existing_mappings:
-                            dict_str += f'    {k}: {v},\n'
-                        dict_str += "}"
-                        updated_dict = cst.parse_expression(dict_str)
+                        if matched:
+                            continue
+                            
+                        # 2. Match by target to handle key renames/updates
+                        for idx, item in enumerate(existing_items):
+                            if idx not in updated_existing_indices and item["target"] == new_target:
+                                item["key"] = new_key
+                                updated_existing_indices.add(idx)
+                                matched = True
+                                break
+                                
+                        if not matched:
+                            new_entries_to_add.append((new_key, new_target))
+                            
+                    existing_mappings = []
+                    for idx, item in enumerate(existing_items):
+                        k = item["key"]
+                        v = item["target"]
                         
-                        updated_args = list(call.args)
+                        k_code = k if (k.startswith('"') or k.startswith("'")) else f'"{k}"'
+                        if v == "__end__" or v == "END":
+                            v_code = "END"
+                        elif v.startswith('"') or v.startswith("'"):
+                            v_code = v
+                        else:
+                            v_code = f'"{v}"'
+                        existing_mappings.append((k_code, v_code))
+                        
+                    for new_key, new_target in new_entries_to_add:
+                        k_code = f'"{new_key}"'
+                        v_code = "END" if new_target == "__end__" else f'"{new_target}"'
+                        existing_mappings.append((k_code, v_code))
+                    
+                    self.merged = True
+                    dict_str = "{\n"
+                    for k, v in existing_mappings:
+                        dict_str += f'    {k}: {v},\n'
+                    dict_str += "}"
+                    updated_dict = cst.parse_expression(dict_str)
+                    
+                    updated_args = list(call.args)
+                    if len(call.args) >= 3:
                         updated_args[2] = call.args[2].with_changes(value=updated_dict)
-                        updated_call = call.with_changes(args=updated_args)
-                        return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
+                    else:
+                        updated_args.append(cst.Arg(value=updated_dict))
+                    updated_call = call.with_changes(args=updated_args)
+                    return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
         return updated_node
 
 def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:

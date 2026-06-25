@@ -1,145 +1,134 @@
+from typing import Literal
+
+from langgraph.graph import StateGraph, START, END, MessagesState
+from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.tools import tool
-from dotenv import load_dotenv
-
-from agents.agent import AgentState
-load_dotenv()
-
-from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-from langgraph.graph import START, StateGraph, END
-from langgraph.types import Command
-from langgraph.prebuilt import tools_condition
-from langgraph.prebuilt import ToolNode
-
-import asyncio
-from pathlib import Path
-import os
-from typing import Annotated, List, Literal, NotRequired, Optional, TypedDict
-
-from openai import OpenAI
 
 
-class RailsAgentState(AgentState):
-    todos: str # why did claude code change to annotated.?
-    debug_info: str
-    agent_mode: str
-    llm_model: str
-    failed_tool_calls_count: str
-    
-write_todos, write_file, read_file, ls, edit_file, search_file, bash_command, ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
-delegate_research = {}
-RAILS_AI_BUILDER_AGENT_PROMPT = {}
-build_system_prompt_with_project_context = {}
-get_llm = {}
+# ---------------- State ----------------
 
-import logging
-logger = logging.getLogger(__name__)
+class RailsAgentState(MessagesState):
+    pass
 
 
-# Define base paths relative to project root
-SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
-APP_DIR = PROJECT_ROOT / 'app'
+# ---------------- Dummy tools ----------------
 
-# Global tools list
+@tool
+def write_todos(text: str) -> str:
+    """Stub."""
+    pass
 
-def get_sys_msg():
-    """Build system message with project context and prompt caching.
+@tool
+def write_file(path: str, content: str) -> str:
+    """Stub."""
+    pass
 
-    Loads LEONARDO.md if it exists and appends it to the base prompt.
-    """
-    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT)
-    return {
-        "role": "system",
-        "content": [
-            {
-                "type": "text",
-                "text": full_prompt,
-                "cache_control": {"type": "ephemeral"},  # Only works for Anthropic models.
-            },
-        ],
-    }
+@tool
+def read_file(path: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def ls(path: str = ".") -> str:
+    """Stub."""
+    pass
+
+@tool
+def edit_file(path: str, old: str, new: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def search_file(query: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def bash_command(cmd: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def ls_agents() -> str:
+    """Stub."""
+    pass
+
+@tool
+def read_agent_file(path: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def write_agent_file(path: str, content: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def edit_agent_file(path: str, old: str, new: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def read_langgraph_json() -> str:
+    """Stub."""
+    pass
+
+@tool
+def edit_langgraph_json(content: str) -> str:
+    """Stub."""
+    pass
+
+@tool
+def delegate_research(query: str) -> str:
+    """Stub."""
+    pass
+
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
-    delegate_research,  # Read-only sub-agent for codebase investigation
-    # Agent file tools
-    ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-    read_langgraph_json, edit_langgraph_json
+    ls,
+    read_file,
+    write_file,
+    edit_file,
+    search_file,
+    bash_command,
+    delegate_research,
+    ls_agents,
+    read_agent_file,
+    write_agent_file,
+    edit_agent_file,
+    read_langgraph_json,
+    edit_langgraph_json,
 ]
 
-# Node
-def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
-   # ==================== LLM Model Selection ====================
-   # Get model selection from state (passed from frontend)
-   llm_model = state.get('llm_model') or 'deepseek-v4-flash'
-   logger.info(f"🤖 Using LLM model: {llm_model}")
-   llm = get_llm(llm_model)
-   # =============================================================
 
-   view_path = (state.get('debug_info') or {}).get('view_path')
+# ---------------- Agent node ----------------
 
-   messages = [get_sys_msg()] + state["messages"]
+def leonardo_ai_builder(
+    state: RailsAgentState,
+) -> dict:
+    # Never actually runs; exists only so the graph compiles.
+    return {}
 
-   if view_path:
-      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
 
-   # Tools
-   tools = [
-      write_todos,
-      ls, read_file, write_file, edit_file, search_file, bash_command,
-      delegate_research,  # Read-only sub-agent for codebase investigation
-      # Agent file tools
-      ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-      read_langgraph_json, edit_langgraph_json
-   ]
+# ---------------- Graph ----------------
 
-   failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
-   if failed_tool_calls_count >= 3:
-      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
-      # Don't bind tools when we've failed too many times - we want a text response only
-      # Only pass cache_control for Anthropic models
-      if llm_model.startswith("claude"):
-         response = llm.invoke(messages, cache_control={"type": "ephemeral"})
-      else:
-         response = llm.invoke(messages)
-      # Reset counter by subtracting current count (since reducer uses operator.add)
-      return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
-
-   # Bind tools - parallel_tool_calls is not supported by Gemini
-   if llm_model.startswith("gemini"):
-      llm_with_tools = llm.bind_tools(tools)
-   else:
-      llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-
-   # Only pass cache_control for Anthropic models
-   if llm_model.startswith("claude"):
-      response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
-   else:
-      response = llm_with_tools.invoke(messages)
-   return {"messages": [response]}
-
-# Graph
 def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
 
-    # Define nodes: these do the work
     builder.add_node("leonardo_ai_builder", leonardo_ai_builder)
     builder.add_node("tools", ToolNode(default_tools))
-    
-    # Define edges: these determine how the control flow moves
+
     builder.add_edge(START, "leonardo_ai_builder")
 
     builder.add_conditional_edges(
         "leonardo_ai_builder",
         tools_condition,
-        {"tools": "tools", END: END},
     )
 
     builder.add_edge("tools", "leonardo_ai_builder")
 
-    react_graph = builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=checkpointer)
 
-    return react_graph
+
+graph = build_workflow()
