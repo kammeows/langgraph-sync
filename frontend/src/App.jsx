@@ -913,15 +913,7 @@ function App() {
         {nodes.length === 0 && (
           <div className="empty-state-container">
             <h2>No Graph Detected</h2>
-            <p>Please upload your LangGraph code to get started.</p>
-            <button
-              className="empty-state-upload-btn"
-              onClick={() =>
-                document.getElementById("code-upload-input").click()
-              }
-            >
-              📁 Upload LangGraph Code
-            </button>
+            <p>Please configure a valid LangGraph file in your project configuration to get started.</p>
           </div>
         )}
         <div className="controls-container">
@@ -993,34 +985,7 @@ function App() {
           >
             + END Node
           </button>
-          {/* <button
-            className="add-node-btn"
-            style={{ backgroundColor: "#0284c7" }}
-            onClick={() => setIsPRModalOpen(true)}
-          >
-            Create Pull Request
-          </button> */}
-          <input
-            type="file"
-            id="code-upload-input"
-            style={{ display: "none" }}
-            accept=".py"
-            onChange={async (e) => {
-              const file = e.target.files[0];
-              if (!file) return;
-              const formData = new FormData();
-              formData.append("file", file);
-              const res = await fetch(
-                "http://localhost:8001/api/graph/upload",
-                { method: "POST", body: formData },
-              );
-              if (res.ok) {
-                const data = await res.json();
-                if (data.code !== undefined) setCode(data.code);
-                processGraphStateInternal(data);
-              }
-            }}
-          />
+
         </div>
 
         <button
