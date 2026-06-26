@@ -1,8 +1,6 @@
 # LangGraph Sync Visual Builder - VS Code Extension Guide
 
-Welcome to the **LangGraph Sync Visual Builder** VS Code Extension! This tool provides a two-way visual graph editor and AST-based code generator for LangGraph, allowing you to design, edit, and inspect graphs visually directly from your code, without requiring manual environment configuration.
-
-The extension bundles a background FastAPI backend server and static React frontend assets, launching them seamlessly on your local machine.
+The extension bundles a background FastAPI backend server and static React frontend assets, launching them on your local machine.
 
 ---
 
@@ -64,7 +62,7 @@ Before starting the builder, the extension checks if `langgraph.json` is present
 3. Alternatively:
    - Open the VS Code Command Palette (`F1` or `Ctrl + Shift + P` / `Cmd + Shift + P`).
    - Run the command: **`LangGraph: Open Visual Builder`**.
-4. The extension will start the background server on `http://localhost:8001` and automatically open the application in your system's default browser.
+4. The extension will start the background server on `http://localhost:8000` and automatically open the application in your system's default browser.
 
 ### 2. Stop the Server
 
