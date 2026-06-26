@@ -228,9 +228,9 @@ builder = StateGraph(MultiAgentState)
 
 builder.add_node("router", router_node)
 builder.add_node("database_expert", sql_expert_node)
-builder.add_node("langchain_expert", search_expert_node)
-builder.add_node("general_assistant", general_assistant_node)
-builder.add_node("human_validation", human_feedback_node)
+builder.add_node("lanfhciaanfiuewh", search_expert_node)
+builder.add_node("meow", general_assistant_node)
+builder.add_node("human", human_feedback_node)
 builder.add_node("editor", editor_node)
 
 builder.set_entry_point("router")
@@ -239,19 +239,19 @@ builder.add_conditional_edges(
     "router",
     route_question,
     {
-    "LANGCHAIN": "langchain_expert",
-    "GENERAL": "general_assistant",
+    "LANGCHAIN": "lanfhciaanfiuewh",
+    "GENERAL": "meow",
     "DATABASE": "database_expert",
 },
 )
 
-builder.add_edge("database_expert", "human_validation")
-builder.add_edge("langchain_expert", "human_validation")
-builder.add_edge("general_assistant", "human_validation")
+builder.add_edge("database_expert", "human")
+builder.add_edge("lanfhciaanfiuewh", "human")
+builder.add_edge("meow", "human")
 
-builder.add_edge("human_validation", "editor")
+builder.add_edge("human", "editor")
 builder.add_edge("editor", END)
 
 graph = builder.compile(
-    interrupt_before=["human_validation"]
+    interrupt_before=["human"]
 )

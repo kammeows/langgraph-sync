@@ -30,11 +30,11 @@ const PRModal = ({ isOpen, onClose }) => {
     setLoading(true);
     setError(null);
     try {
-      const statusRes = await fetch("http://localhost:8001/api/git/status");
+      const statusRes = await fetch("http://localhost:8000/api/git/status");
       const statusData = await statusRes.json();
       setStatus(statusData);
 
-      const diffRes = await fetch("http://localhost:8001/api/git/diff");
+      const diffRes = await fetch("http://localhost:8000/api/git/diff");
       const diffData = await diffRes.json();
       setDiff(diffData.diff || "");
     } catch (err) {
@@ -59,7 +59,7 @@ const PRModal = ({ isOpen, onClose }) => {
     );
 
     try {
-      const response = await fetch("http://localhost:8001/api/git/create-pr", {
+      const response = await fetch("http://localhost:8000/api/git/create-pr", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

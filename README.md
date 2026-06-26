@@ -108,7 +108,7 @@ Start the FastAPI server from the root directory:
 venv\Scripts\python server/server.py
 ```
 
-The server starts on `http://localhost:8001`.
+The server starts on `http://localhost:8000`.
 
 ### Step 2: Run the Frontend App
 
