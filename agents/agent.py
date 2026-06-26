@@ -618,7 +618,7 @@ def create_agent_graph():
     workflow.add_node("BRAIN_TUMOR_AGENT", run_brain_tumor_agent)
     workflow.add_node("CHEST_XRAY_AGENT", run_chest_xray_agent)
     workflow.add_node("SKIN_LESION_AGENT", run_skin_lesion_agent)
-    workflow.add_node("check_validation", handle_human_validation)
+    workflow.add_node("check_validationnn", handle_human_validation)
     workflow.add_node("human_validation", perform_human_validation)
     workflow.add_node("apply_guardrails", apply_output_guardrails)
     
@@ -651,19 +651,19 @@ def create_agent_graph():
     )
     
     # Connect agent outputs to validation check
-    workflow.add_edge("CONVERSATION_AGENT11", "check_validation")
+    workflow.add_edge("CONVERSATION_AGENT11", "check_validationnn")
     # workflow.add_edge("RAG_AGENT", "check_validation")
-    workflow.add_edge("WEB_SEARCH_PROCESSOR_AGENT", "check_validation")
+    workflow.add_edge("WEB_SEARCH_PROCESSOR_AGENT", "check_validationnn")
     workflow.add_conditional_edges("RAG_AGENT", confidence_based_routing)
-    workflow.add_edge("BRAIN_TUMOR_AGENT", "check_validation")
-    workflow.add_edge("CHEST_XRAY_AGENT", "check_validation")
-    workflow.add_edge("SKIN_LESION_AGENT", "check_validation")
+    workflow.add_edge("BRAIN_TUMOR_AGENT", "check_validationnn")
+    workflow.add_edge("CHEST_XRAY_AGENT", "check_validationnn")
+    workflow.add_edge("SKIN_LESION_AGENT", "check_validationnn")
 
     workflow.add_edge("human_validation", "apply_guardrails")
     workflow.add_edge("apply_guardrails", END)
     
     workflow.add_conditional_edges(
-        "check_validation",
+        "check_validationnn",
         lambda x: x["next"],
         {
             "human_validation": "human_validation",

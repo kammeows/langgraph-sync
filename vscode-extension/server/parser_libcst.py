@@ -62,6 +62,14 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.graph_var_names = set()
         self._potential_builders = set()
         
+        self.scope_nodes = {}
+        self.scope_edges = {}
+        self.scope_conditional_edges = {}
+        self.scope_entry_points = {}
+        self.target_scope = None
+        self._all_graph_assignments = []
+        self._target_var_found = False
+        
         self.current_file_path = current_file_path
         self.visited_files = visited_files if visited_files is not None else set()
         self.workspace_root = workspace_root
@@ -104,23 +112,96 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
         return name_str
 
+    def _process_prebuilt_agent(self, node: cst.Assign):
+        state_schema_val = None
+        for arg in node.value.args:
+            if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
+                if isinstance(arg.value, cst.Name):
+                    state_schema_val = arg.value.value
+        
+        if state_schema_val:
+            self.state_class_name = state_schema_val
+        
+        self.entry_point = "agent"
+        self.nodes["agent"] = "agent"
+        self.nodes["tools"] = "ToolNode"
+        self.edges.append(("tools", "agent"))
+        cond_dict = {
+            "source": "agent",
+            "router": "tools_condition",
+            "mapping": {"tools": "tools", "__end__": "__end__"}
+        }
+        self.conditional_edges.append(cond_dict)
+
+        self.scope_entry_points[self._current_function] = "agent"
+        self.scope_nodes.setdefault(self._current_function, {})["agent"] = "agent"
+        self.scope_nodes.setdefault(self._current_function, {})["tools"] = "ToolNode"
+        self.scope_edges.setdefault(self._current_function, []).append(("tools", "agent"))
+        self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
+
     def visit_Assign(self, node: cst.Assign):
+        # Extract target variable name
+        target_name = None
+        for target in node.targets:
+            if isinstance(target.target, cst.Name):
+                target_name = target.target.value
+                break
+
+        # Check compile() call
+        is_compile = False
+        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
+            is_compile = True
+            self._all_graph_assignments.append({
+                "type": "compile",
+                "var_name": target_name,
+                "scope": self._current_function
+            })
+            if self.target_var and target_name == self.target_var:
+                self._target_var_found = True
+                self.target_scope = self._current_function
+
+        # Detect create_agent or create_react_agent
+        is_prebuilt_agent = False
+        func_name = None
+        if isinstance(node.value, cst.Call):
+            if isinstance(node.value.func, cst.Name):
+                func_name = node.value.func.value
+            elif isinstance(node.value.func, cst.Attribute) and isinstance(node.value.func.attr, cst.Name):
+                func_name = node.value.func.attr.value
+            
+            if func_name in ("create_agent", "create_react_agent"):
+                is_prebuilt_agent = True
+
+        if is_prebuilt_agent:
+            self._all_graph_assignments.append({
+                "type": "prebuilt",
+                "var_name": target_name,
+                "scope": self._current_function,
+                "node": node
+            })
+            
+            is_target = False
+            if not self.target_var or target_name == self.target_var:
+                is_target = True
+                
+            if is_target:
+                self._target_var_found = True
+                self.target_scope = self._current_function
+                self._process_prebuilt_agent(node)
+
         # Detect StateGraph(AgentState)
-        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
+        elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
             for target in node.targets:
                 if isinstance(target.target, cst.Name):
                     var_name = target.target.value
                     self._potential_builders.add(var_name)
                     self.graph_var_names.add(var_name)
-                        
-        # Detect compile() call
-        elif self.target_var and isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute):
-            if node.value.func.attr.value == "compile":
-                if isinstance(node.value.func.value, cst.Name):
-                    builder_name = node.value.func.value.value
-                    for target in node.targets:
-                        if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
-                            pass
+
+        # Track target scope for local function calls
+        elif isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
+            raw_callable = extract_callable_name(node.value)
+            if raw_callable and self.target_var and target_name == self.target_var:
+                self.target_scope = raw_callable
 
         # Detect assignments for variable types mapping
         if isinstance(node.value, cst.Call):
@@ -346,6 +427,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
                     if node_name and function_name:
                         self.nodes[node_name] = function_name
+                        self.scope_nodes.setdefault(self._current_function, {})[node_name] = function_name
 
                 # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
@@ -357,14 +439,17 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     if src_val and dst_val:
                         if src_val == "__start__":
                             self.entry_point = dst_val
+                            self.scope_entry_points[self._current_function] = dst_val
                         else:
                             self.edges.append((src_val, dst_val))
+                            self.scope_edges.setdefault(self._current_function, []).append((src_val, dst_val))
 
                 # set_entry_point
                 elif method_name == "set_entry_point" and len(node.args) >= 1:
                     arg0 = node.args[0].value
                     if isinstance(arg0, cst.SimpleString):
                         self.entry_point = arg0.evaluated_value
+                        self.scope_entry_points[self._current_function] = arg0.evaluated_value
 
                 # add_conditional_edges
                 elif method_name == "add_conditional_edges" and len(node.args) >= 2:
@@ -386,11 +471,16 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                 if key and val:
                                     mapping[key] = val
 
-                    self.conditional_edges.append({
+                    if not mapping and router_fn == "tools_condition":
+                        mapping = {"tools": "tools", "__end__": "__end__"}
+
+                    cond_dict = {
                         "source": source,
                         "router": router_fn,
                         "mapping": mapping
-                    })
+                    }
+                    self.conditional_edges.append(cond_dict)
+                    self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
 
     def leave_Module(self, original_node: cst.Module):
         # Fallback for builders
@@ -499,6 +589,38 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     for ret in self.function_returns[router]:
                         if ret:
                             cond["mapping"][ret] = ret
+
+        # Fallback if target_var was not found in graph assignments
+        if self.target_var and not self._target_var_found and self._all_graph_assignments:
+            final_assign = self._all_graph_assignments[-1]
+            if final_assign["type"] == "prebuilt":
+                self._process_prebuilt_agent(final_assign["node"])
+                self.target_scope = final_assign["scope"]
+                if self.target_scope not in self.functions:
+                    self.target_scope = None
+            elif final_assign["type"] == "compile":
+                self.target_scope = final_assign["scope"]
+
+        # Resolve target scope if it's not explicitly set by assignment
+        if not self.target_scope:
+            # Fallback: if there's only one scope with nodes, use that as target scope
+            active_scopes = [s for s, nds in self.scope_nodes.items() if nds]
+            if len(active_scopes) == 1:
+                self.target_scope = active_scopes[0]
+            else:
+                self.target_scope = None  # Default to global scope
+        else:
+            # If target_scope was set to a callable name, check if it's actually a local function
+            # If it's not a local function (e.g. create_agent, which is imported), we should use self.target_scope = None
+            if self.target_scope not in self.functions:
+                self.target_scope = None
+
+        # Apply target scope filtering
+        if self.target_scope is not None or any(self.target_scope in d for d in (self.scope_nodes, self.scope_edges, self.scope_conditional_edges, self.scope_entry_points)):
+            self.nodes = self.scope_nodes.get(self.target_scope, {})
+            self.edges = self.scope_edges.get(self.target_scope, [])
+            self.conditional_edges = self.scope_conditional_edges.get(self.target_scope, [])
+            self.entry_point = self.scope_entry_points.get(self.target_scope, None)
 
     def _merge_function_meta(self, orig_name: str, alias_name: str, other_analyzer):
         if alias_name not in self.functions:
@@ -931,6 +1053,33 @@ class RenameNodeTransformer(cst.CSTTransformer):
                     new_args[0] = new_arg
                     return updated_node.with_changes(args=new_args)
 
+        # Handle compile(interrupt_before=[...], interrupt_after=[...])
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("compile"))) or (isinstance(original_node.func, cst.Name) and original_node.func.value == "compile"):
+            new_args = list(updated_node.args)
+            changed = False
+            for idx, arg in enumerate(new_args):
+                if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value in ("interrupt_before", "interrupt_after"):
+                    val = arg.value
+                    if isinstance(val, (cst.List, cst.Tuple)):
+                        new_elements = []
+                        list_changed = False
+                        for el in val.elements:
+                            if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.old_id:
+                                new_el = el.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                                new_elements.append(new_el)
+                                list_changed = True
+                            else:
+                                new_elements.append(el)
+                        if list_changed:
+                            new_val = val.with_changes(elements=new_elements)
+                            new_args[idx] = arg.with_changes(value=new_val)
+                            changed = True
+                    elif isinstance(val, cst.SimpleString) and val.evaluated_value == self.old_id:
+                        new_args[idx] = arg.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                        changed = True
+            if changed:
+                return updated_node.with_changes(args=new_args)
+
         return updated_node
 
     def leave_DictElement(self, original_node: cst.DictElement, updated_node: cst.DictElement):
@@ -1074,10 +1223,9 @@ class MergeConditionalEdgeTransformer(cst.CSTTransformer):
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(value=m.Name(self.graph_var), attr=m.Name("add_conditional_edges"))))])):
             expr = updated_node.body[0]
             call = expr.value
-            if len(call.args) >= 3:
+            if len(call.args) >= 2:
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
-                arg2 = call.args[2].value
                 
                 match_src = False
                 if isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.source:
@@ -1087,81 +1235,86 @@ class MergeConditionalEdgeTransformer(cst.CSTTransformer):
                 
                 router_code = cst.parse_module("").code_for_node(arg1).strip()
                 if match_src and router_code == self.router_fn:
-                    if isinstance(arg2, cst.Dict):
-                        existing_items = []
-                        for el in arg2.elements:
-                            if isinstance(el, cst.DictElement):
-                                k_val = el.key.evaluated_value if isinstance(el.key, cst.SimpleString) else cst.parse_module("").code_for_node(el.key).strip()
-                                
-                                if isinstance(el.value, cst.SimpleString):
-                                    v_val = el.value.evaluated_value
-                                elif isinstance(el.value, cst.Name) and el.value.value == "END":
-                                    v_val = "__end__"
-                                else:
-                                    v_val = cst.parse_module("").code_for_node(el.value).strip()
-                                
-                                existing_items.append({
-                                    "key": k_val,
-                                    "target": v_val
-                                })
-                        
-                        updated_existing_indices = set()
-                        new_entries_to_add = []
-                        
-                        for new_key, new_target in self.new_mapping.items():
-                            matched = False
-                            # 1. Match by key first
-                            for idx, item in enumerate(existing_items):
-                                if item["key"] == new_key:
-                                    item["target"] = new_target
-                                    updated_existing_indices.add(idx)
-                                    matched = True
-                                    break
-                            
-                            if matched:
-                                continue
-                                
-                            # 2. Match by target to handle key renames/updates
-                            for idx, item in enumerate(existing_items):
-                                if idx not in updated_existing_indices and item["target"] == new_target:
-                                    item["key"] = new_key
-                                    updated_existing_indices.add(idx)
-                                    matched = True
-                                    break
+                    existing_items = []
+                    if len(call.args) >= 3:
+                        arg2 = call.args[2].value
+                        if isinstance(arg2, cst.Dict):
+                            for el in arg2.elements:
+                                if isinstance(el, cst.DictElement):
+                                    k_val = el.key.evaluated_value if isinstance(el.key, cst.SimpleString) else cst.parse_module("").code_for_node(el.key).strip()
                                     
-                            if not matched:
-                                new_entries_to_add.append((new_key, new_target))
-                                
-                        existing_mappings = []
+                                    if isinstance(el.value, cst.SimpleString):
+                                        v_val = el.value.evaluated_value
+                                    elif isinstance(el.value, cst.Name) and el.value.value == "END":
+                                        v_val = "__end__"
+                                    else:
+                                        v_val = cst.parse_module("").code_for_node(el.value).strip()
+                                    
+                                    existing_items.append({
+                                        "key": k_val,
+                                        "target": v_val
+                                    })
+                        
+                    updated_existing_indices = set()
+                    new_entries_to_add = []
+                    
+                    for new_key, new_target in self.new_mapping.items():
+                        matched = False
+                        # 1. Match by key first
                         for idx, item in enumerate(existing_items):
-                            k = item["key"]
-                            v = item["target"]
-                            
-                            k_code = k if (k.startswith('"') or k.startswith("'")) else f'"{k}"'
-                            if v == "__end__" or v == "END":
-                                v_code = "END"
-                            elif v.startswith('"') or v.startswith("'"):
-                                v_code = v
-                            else:
-                                v_code = f'"{v}"'
-                            existing_mappings.append((k_code, v_code))
-                            
-                        for new_key, new_target in new_entries_to_add:
-                            k_code = f'"{new_key}"'
-                            v_code = "END" if new_target == "__end__" else f'"{new_target}"'
-                            existing_mappings.append((k_code, v_code))
+                            if item["key"] == new_key:
+                                item["target"] = new_target
+                                updated_existing_indices.add(idx)
+                                matched = True
+                                break
                         
-                        self.merged = True
-                        dict_str = "{\n"
-                        for k, v in existing_mappings:
-                            dict_str += f'    {k}: {v},\n'
-                        dict_str += "}"
-                        updated_dict = cst.parse_expression(dict_str)
+                        if matched:
+                            continue
+                            
+                        # 2. Match by target to handle key renames/updates
+                        for idx, item in enumerate(existing_items):
+                            if idx not in updated_existing_indices and item["target"] == new_target:
+                                item["key"] = new_key
+                                updated_existing_indices.add(idx)
+                                matched = True
+                                break
+                                
+                        if not matched:
+                            new_entries_to_add.append((new_key, new_target))
+                            
+                    existing_mappings = []
+                    for idx, item in enumerate(existing_items):
+                        k = item["key"]
+                        v = item["target"]
                         
-                        updated_args = list(call.args)
+                        k_code = k if (k.startswith('"') or k.startswith("'")) else f'"{k}"'
+                        if v == "__end__" or v == "END":
+                            v_code = "END"
+                        elif v.startswith('"') or v.startswith("'"):
+                            v_code = v
+                        else:
+                            v_code = f'"{v}"'
+                        existing_mappings.append((k_code, v_code))
+                        
+                    for new_key, new_target in new_entries_to_add:
+                        k_code = f'"{new_key}"'
+                        v_code = "END" if new_target == "__end__" else f'"{new_target}"'
+                        existing_mappings.append((k_code, v_code))
+                    
+                    self.merged = True
+                    dict_str = "{\n"
+                    for k, v in existing_mappings:
+                        dict_str += f'    {k}: {v},\n'
+                    dict_str += "}"
+                    updated_dict = cst.parse_expression(dict_str)
+                    
+                    updated_args = list(call.args)
+                    if len(call.args) >= 3:
                         updated_args[2] = call.args[2].with_changes(value=updated_dict)
-                        updated_call = call.with_changes(args=updated_args)
-                        return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
+                    else:
+                        updated_args.append(cst.Arg(value=updated_dict))
+                    updated_call = call.with_changes(args=updated_args)
+                    return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
         return updated_node
 
 def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:

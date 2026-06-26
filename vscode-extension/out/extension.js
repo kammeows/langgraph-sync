@@ -66,10 +66,10 @@ async function checkAndSetupLanggraphConfig(projectRoot) {
     for (const fileUri of pythonFiles) {
         try {
             const content = fs.readFileSync(fileUri.fsPath, 'utf8');
-            if (content.includes('StateGraph')) {
+            if (content.includes('StateGraph') || content.includes('create_agent') || content.includes('create_react_agent')) {
                 const relativePath = path.relative(projectRoot, fileUri.fsPath).replace(/\\/g, '/');
                 selectedFile = relativePath;
-                const compileMatch = content.match(/(\w+)\s*=\s*\w+\.compile\(\)/);
+                const compileMatch = content.match(/(\w+)\s*=\s*(?:\w+\.compile|create_agent|create_react_agent)\s*\(/);
                 if (compileMatch) {
                     selectedGraphVar = compileMatch[1];
                 }

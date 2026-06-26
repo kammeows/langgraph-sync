@@ -993,19 +993,13 @@ function App() {
           >
             + END Node
           </button>
-          <button
-            className="upload-btn"
-            onClick={() => document.getElementById("code-upload-input").click()}
-          >
-            Upload Code
-          </button>
-          <button
+          {/* <button
             className="add-node-btn"
             style={{ backgroundColor: "#0284c7" }}
             onClick={() => setIsPRModalOpen(true)}
           >
             Create Pull Request
-          </button>
+          </button> */}
           <input
             type="file"
             id="code-upload-input"
@@ -1112,7 +1106,7 @@ function App() {
                 onMount={handleEditorDidMount}
                 onChange={handleEditorChange}
                 options={{
-                  readOnly: false,
+                  readOnly: true,
                   minimap: { enabled: false },
                   fontSize: 14,
                   lineNumbers: "on",

@@ -67,6 +67,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.scope_conditional_edges = {}
         self.scope_entry_points = {}
         self.target_scope = None
+        self._all_graph_assignments = []
+        self._target_var_found = False
         
         self.current_file_path = current_file_path
         self.visited_files = visited_files if visited_files is not None else set()
@@ -110,23 +112,53 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
         return name_str
 
+    def _process_prebuilt_agent(self, node: cst.Assign):
+        state_schema_val = None
+        for arg in node.value.args:
+            if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
+                if isinstance(arg.value, cst.Name):
+                    state_schema_val = arg.value.value
+        
+        if state_schema_val:
+            self.state_class_name = state_schema_val
+        
+        self.entry_point = "agent"
+        self.nodes["agent"] = "agent"
+        self.nodes["tools"] = "ToolNode"
+        self.edges.append(("tools", "agent"))
+        cond_dict = {
+            "source": "agent",
+            "router": "tools_condition",
+            "mapping": {"tools": "tools", "__end__": "__end__"}
+        }
+        self.conditional_edges.append(cond_dict)
+
+        self.scope_entry_points[self._current_function] = "agent"
+        self.scope_nodes.setdefault(self._current_function, {})["agent"] = "agent"
+        self.scope_nodes.setdefault(self._current_function, {})["tools"] = "ToolNode"
+        self.scope_edges.setdefault(self._current_function, []).append(("tools", "agent"))
+        self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
+
     def visit_Assign(self, node: cst.Assign):
-        # Track target scope when target_var is assigned
-        if self.target_var:
-            is_target_var_assignment = False
-            for target in node.targets:
-                if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
-                    is_target_var_assignment = True
-                    break
-            
-            if is_target_var_assignment:
-                if isinstance(node.value, cst.Call):
-                    raw_callable = extract_callable_name(node.value)
-                    if raw_callable:
-                        if isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
-                            self.target_scope = self._current_function
-                        else:
-                            self.target_scope = raw_callable
+        # Extract target variable name
+        target_name = None
+        for target in node.targets:
+            if isinstance(target.target, cst.Name):
+                target_name = target.target.value
+                break
+
+        # Check compile() call
+        is_compile = False
+        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
+            is_compile = True
+            self._all_graph_assignments.append({
+                "type": "compile",
+                "var_name": target_name,
+                "scope": self._current_function
+            })
+            if self.target_var and target_name == self.target_var:
+                self._target_var_found = True
+                self.target_scope = self._current_function
 
         # Detect create_agent or create_react_agent
         is_prebuilt_agent = False
@@ -141,39 +173,21 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 is_prebuilt_agent = True
 
         if is_prebuilt_agent:
-            # Check target matches target_var
-            is_target = False
-            for target in node.targets:
-                if isinstance(target.target, cst.Name) and (not self.target_var or target.target.value == self.target_var):
-                    is_target = True
-                    break
+            self._all_graph_assignments.append({
+                "type": "prebuilt",
+                "var_name": target_name,
+                "scope": self._current_function,
+                "node": node
+            })
             
+            is_target = False
+            if not self.target_var or target_name == self.target_var:
+                is_target = True
+                
             if is_target:
-                state_schema_val = None
-                for arg in node.value.args:
-                    if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
-                        if isinstance(arg.value, cst.Name):
-                            state_schema_val = arg.value.value
-                
-                if state_schema_val:
-                    self.state_class_name = state_schema_val
-                
-                self.entry_point = "agent"
-                self.nodes["agent"] = "agent"
-                self.nodes["tools"] = "ToolNode"
-                self.edges.append(("tools", "agent"))
-                cond_dict = {
-                    "source": "agent",
-                    "router": "tools_condition",
-                    "mapping": {"tools": "tools", "__end__": "__end__"}
-                }
-                self.conditional_edges.append(cond_dict)
-
-                self.scope_entry_points[self._current_function] = "agent"
-                self.scope_nodes.setdefault(self._current_function, {})["agent"] = "agent"
-                self.scope_nodes.setdefault(self._current_function, {})["tools"] = "ToolNode"
-                self.scope_edges.setdefault(self._current_function, []).append(("tools", "agent"))
-                self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
+                self._target_var_found = True
+                self.target_scope = self._current_function
+                self._process_prebuilt_agent(node)
 
         # Detect StateGraph(AgentState)
         elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
@@ -182,15 +196,12 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     var_name = target.target.value
                     self._potential_builders.add(var_name)
                     self.graph_var_names.add(var_name)
-                        
-        # Detect compile() call
-        elif self.target_var and isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute):
-            if node.value.func.attr.value == "compile":
-                if isinstance(node.value.func.value, cst.Name):
-                    builder_name = node.value.func.value.value
-                    for target in node.targets:
-                        if isinstance(target.target, cst.Name) and target.target.value == self.target_var:
-                            pass
+
+        # Track target scope for local function calls
+        elif isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
+            raw_callable = extract_callable_name(node.value)
+            if raw_callable and self.target_var and target_name == self.target_var:
+                self.target_scope = raw_callable
 
         # Detect assignments for variable types mapping
         if isinstance(node.value, cst.Call):
@@ -578,6 +589,17 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     for ret in self.function_returns[router]:
                         if ret:
                             cond["mapping"][ret] = ret
+
+        # Fallback if target_var was not found in graph assignments
+        if self.target_var and not self._target_var_found and self._all_graph_assignments:
+            final_assign = self._all_graph_assignments[-1]
+            if final_assign["type"] == "prebuilt":
+                self._process_prebuilt_agent(final_assign["node"])
+                self.target_scope = final_assign["scope"]
+                if self.target_scope not in self.functions:
+                    self.target_scope = None
+            elif final_assign["type"] == "compile":
+                self.target_scope = final_assign["scope"]
 
         # Resolve target scope if it's not explicitly set by assignment
         if not self.target_scope:
@@ -1030,6 +1052,33 @@ class RenameNodeTransformer(cst.CSTTransformer):
                     new_args = list(updated_node.args)
                     new_args[0] = new_arg
                     return updated_node.with_changes(args=new_args)
+
+        # Handle compile(interrupt_before=[...], interrupt_after=[...])
+        if m.matches(original_node.func, m.Attribute(attr=m.Name("compile"))) or (isinstance(original_node.func, cst.Name) and original_node.func.value == "compile"):
+            new_args = list(updated_node.args)
+            changed = False
+            for idx, arg in enumerate(new_args):
+                if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value in ("interrupt_before", "interrupt_after"):
+                    val = arg.value
+                    if isinstance(val, (cst.List, cst.Tuple)):
+                        new_elements = []
+                        list_changed = False
+                        for el in val.elements:
+                            if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.old_id:
+                                new_el = el.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                                new_elements.append(new_el)
+                                list_changed = True
+                            else:
+                                new_elements.append(el)
+                        if list_changed:
+                            new_val = val.with_changes(elements=new_elements)
+                            new_args[idx] = arg.with_changes(value=new_val)
+                            changed = True
+                    elif isinstance(val, cst.SimpleString) and val.evaluated_value == self.old_id:
+                        new_args[idx] = arg.with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                        changed = True
+            if changed:
+                return updated_node.with_changes(args=new_args)
 
         return updated_node
 
