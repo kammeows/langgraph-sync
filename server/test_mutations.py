@@ -363,6 +363,36 @@ graph = builder.compile()
         self.assertNotIn(("b2", "d"), analyzer_deleted_node.edges)
         self.assertIn(("c", "d"), analyzer_deleted_node.edges)
 
+    def test_list_conditional_edge_mutations(self):
+        cond_list_code = """
+from langgraph.graph import StateGraph, START, END
+
+def generate_topics(state): pass
+def continue_to_jokes(state): pass
+def generate_joke(state): pass
+def other_node(state): pass
+
+builder = StateGraph(dict)
+builder.add_node("generate_topics", generate_topics)
+builder.add_node("generate_joke", generate_joke)
+builder.add_node("other_node", other_node)
+builder.add_edge(START, "generate_topics")
+builder.add_conditional_edges(
+    "generate_topics",
+    continue_to_jokes,
+    ["generate_joke", "other_node"]
+)
+graph = builder.compile()
+"""
+        # Delete conditional edge to other_node
+        mutated = apply_mutation_to_source(cond_list_code, "delete_edge", source="generate_topics", target="other_node")
+        self.assertIn('["generate_joke", ]', mutated)
+        self.assertNotIn('["generate_joke", "other_node"]', mutated)
+
+        # Delete all conditional edges from generate_topics
+        mutated_all = apply_mutation_to_source(mutated, "delete_edge", source="generate_topics", target="generate_joke")
+        self.assertNotIn('add_conditional_edges', mutated_all)
+
 if __name__ == "__main__":
     unittest.main()
 

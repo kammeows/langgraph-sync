@@ -992,6 +992,28 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                     return updated_node.with_changes(
                         body=[cst.Expr(value=call.with_changes(args=new_args))]
                     )
+                elif isinstance(arg2, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    for el in arg2.elements:
+                        val_match = False
+                        if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.dst:
+                            val_match = True
+                        elif isinstance(el.value, cst.Name) and el.value.value == "END" and self.dst == "__end__":
+                            val_match = True
+                        
+                        if val_match:
+                            continue
+                        new_elements.append(el)
+                    
+                    if not new_elements:
+                        return cst.RemoveFromParent()
+                    
+                    new_list = arg2.with_changes(elements=new_elements)
+                    new_args = list(call.args)
+                    new_args[2] = call.args[2].with_changes(value=new_list)
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         return updated_node
 
