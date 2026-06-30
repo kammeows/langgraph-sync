@@ -1,17 +1,13 @@
 .validation-panel {
-  position: absolute;
-  left: 50px;
-  bottom: 20px;
-  width: 300px;
+  width: 100%;
   background-color: #1e1e1e;
   border: 1px solid #333;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  z-index: 50;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
   transition: all 0.3s ease;
-  max-height: 400px;
+  max-height: 250px;
 }
 
 .validation-panel.collapsed {

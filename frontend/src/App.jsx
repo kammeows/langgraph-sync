@@ -923,7 +923,8 @@ function App() {
               onChange={(e) => setSelectedGraphId(e.target.value)}
               className="graph-selector"
               style={{
-                padding: "6px",
+                padding: "4px 8px",
+                fontSize: "11px",
                 borderRadius: "4px",
                 marginRight: "10px",
                 backgroundColor: "#2d2d2d",
@@ -1016,8 +1017,10 @@ function App() {
           <Background variant="dots" gap={12} size={1} />
         </ReactFlow>
 
-        <ValidationPanel warnings={warnings} />
-        <StateSchemaPanel schema={stateSchema} />
+        <div className="canvas-side-panels">
+          <StateSchemaPanel schema={stateSchema} />
+          <ValidationPanel warnings={warnings} />
+        </div>
       </div>
 
       <div
@@ -1030,7 +1033,7 @@ function App() {
             className="editor-panel"
             style={
               editorHeightPercent === 0
-                ? { display: "none" }
+                ? { height: 0, display: "none" }
                 : editorHeightPercent === 100
                   ? { height: "100%" }
                   : { height: `${editorHeightPercent}%` }
@@ -1038,14 +1041,14 @@ function App() {
           >
             <div className="editor-header">
               <span>Source Code</span>
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "5px" }}>
                 {editorHeightPercent < 100 && (
                   <button
                     className="panel-action-btn"
                     onClick={() => setEditorHeightPercent(100)}
                     title="Maximize Code Editor"
                   >
-                    🗖 Maximize
+                    🗖
                   </button>
                 )}
                 {editorHeightPercent > 0 && editorHeightPercent < 100 && (
@@ -1054,7 +1057,7 @@ function App() {
                     onClick={() => setEditorHeightPercent(0)}
                     title="Collapse Code Editor"
                   >
-                    🗕 Collapse
+                    🗕
                   </button>
                 )}
               </div>
@@ -1073,7 +1076,7 @@ function App() {
                 options={{
                   readOnly: true,
                   minimap: { enabled: false },
-                  fontSize: 14,
+                  fontSize: 12,
                   lineNumbers: "on",
                   scrollBeyondLastLine: false,
                   automaticLayout: true,
