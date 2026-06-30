@@ -317,5 +317,52 @@ graph = builder.compile()
         self.assertEqual(analyzer_mutated.conditional_edges[0]["mapping"]["new_research"], "researcher")
         self.assertEqual(mutated_code.count("add_conditional_edges"), 1)
 
+    def test_list_edges_parsing_and_mutations(self):
+        # 1. Base code containing list edge
+        list_edge_code = """from langgraph.graph import StateGraph, END
+from typing import TypedDict
+
+class AgentState(TypedDict):
+    query: str
+
+def b2(state: AgentState): pass
+def c(state: AgentState): pass
+def d(state: AgentState): pass
+
+builder = StateGraph(AgentState)
+builder.add_node("b2", b2)
+builder.add_node("c", c)
+builder.add_node("d", d)
+builder.add_edge(["b2", "c"], "d")
+builder.add_edge("d", END)
+graph = builder.compile()
+"""
+        # Parse and check edges
+        analyzer = self._get_analyzer_for_code(list_edge_code)
+        self.assertIn(("b2", "d"), analyzer.edges)
+        self.assertIn(("c", "d"), analyzer.edges)
+
+        # 2. Rename node b2 to new_b2
+        renamed_code = apply_mutation_to_source(list_edge_code, "rename", node_id="b2", new_id="new_b2")
+        self.assertIn('builder.add_edge(["new_b2", "c"], "d")', renamed_code)
+        analyzer_renamed = self._get_analyzer_for_code(renamed_code)
+        self.assertIn(("new_b2", "d"), analyzer_renamed.edges)
+        self.assertIn(("c", "d"), analyzer_renamed.edges)
+
+        # 3. Delete edge b2 -> d
+        deleted_edge_code = apply_mutation_to_source(list_edge_code, "delete_edge", source="b2", target="d")
+        self.assertIn('builder.add_edge(["c"], "d")', deleted_edge_code)
+        analyzer_deleted_edge = self._get_analyzer_for_code(deleted_edge_code)
+        self.assertNotIn(("b2", "d"), analyzer_deleted_edge.edges)
+        self.assertIn(("c", "d"), analyzer_deleted_edge.edges)
+
+        # 4. Delete node b2
+        deleted_node_code = apply_mutation_to_source(list_edge_code, "delete_node", node_id="b2")
+        self.assertIn('builder.add_edge(["c"], "d")', deleted_node_code)
+        analyzer_deleted_node = self._get_analyzer_for_code(deleted_node_code)
+        self.assertNotIn(("b2", "d"), analyzer_deleted_node.edges)
+        self.assertIn(("c", "d"), analyzer_deleted_node.edges)
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,7 +1,7 @@
 import libcst as cst
 from libcst import matchers as m
 import os
-from typing import Optional, Set, Dict, Any, List
+from typing import Optional, Set, Dict, Any, List, Tuple
 
 def resolve_module_to_file(module_name: str, current_file_path: str, workspace_root: str) -> Optional[str]:
     # Support relative imports
@@ -39,6 +39,88 @@ def extract_callable_name(node: cst.CSTNode) -> Optional[str]:
     elif isinstance(node, cst.Lambda):
         return "lambda"
     return None
+
+def resolve_node_values(node: cst.CSTNode) -> List[str]:
+    if isinstance(node, cst.SimpleString):
+        return [node.evaluated_value]
+    elif isinstance(node, cst.Name):
+        if node.value == "START":
+            return ["__start__"]
+        elif node.value == "END":
+            return ["__end__"]
+        else:
+            return [node.value]
+    elif isinstance(node, (cst.List, cst.Tuple)):
+        res = []
+        for el in node.elements:
+            res.extend(resolve_node_values(el.value))
+        return res
+    return []
+
+def node_contains_value(node: cst.CSTNode, target_val: str) -> bool:
+    if isinstance(node, cst.SimpleString):
+        return node.evaluated_value == target_val
+    if isinstance(node, cst.Name):
+        if target_val == "__start__" and node.value == "START":
+            return True
+        if target_val == "__end__" and node.value == "END":
+            return True
+        return node.value == target_val
+    if isinstance(node, (cst.List, cst.Tuple)):
+        return any(node_contains_value(el.value, target_val) for el in node.elements)
+    return False
+
+def remove_value_from_node(node: cst.CSTNode, target_val: str) -> Optional[cst.CSTNode]:
+    if isinstance(node, cst.SimpleString) and node.evaluated_value == target_val:
+        return None
+    if isinstance(node, cst.Name):
+        if target_val == "__start__" and node.value == "START":
+            return None
+        if target_val == "__end__" and node.value == "END":
+            return None
+        if node.value == target_val:
+            return None
+    if isinstance(node, (cst.List, cst.Tuple)):
+        new_elements = []
+        for el in node.elements:
+            new_val = remove_value_from_node(el.value, target_val)
+            if new_val is not None:
+                if new_val is el.value:
+                    new_elements.append(el)
+                else:
+                    new_elements.append(el.with_changes(value=new_val))
+        if not new_elements:
+            return None
+        return node.with_changes(elements=new_elements)
+    return node
+
+def rename_value_in_node(node: cst.CSTNode, old_val: str, new_val: str) -> Tuple[cst.CSTNode, bool]:
+    if isinstance(node, cst.SimpleString) and node.evaluated_value == old_val:
+        return cst.SimpleString(f'"{new_val}"'), True
+    if isinstance(node, cst.Name):
+        if old_val == "__start__" and node.value == "START":
+            if new_val == "__start__":
+                return node, False
+            return cst.SimpleString(f'"{new_val}"'), True
+        if old_val == "__end__" and node.value == "END":
+            if new_val == "__end__":
+                return node, False
+            return cst.SimpleString(f'"{new_val}"'), True
+        if node.value == old_val:
+            return cst.SimpleString(f'"{new_val}"'), True
+    if isinstance(node, (cst.List, cst.Tuple)):
+        new_elements = []
+        changed = False
+        for el in node.elements:
+            renamed_val, val_changed = rename_value_in_node(el.value, old_val, new_val)
+            if val_changed:
+                new_elements.append(el.with_changes(value=renamed_val))
+                changed = True
+            else:
+                new_elements.append(el)
+        if changed:
+            return node.with_changes(elements=new_elements), True
+    return node, False
 
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
@@ -386,9 +468,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             # 3. List/Tuple return (for parallel conditional routing)
             elif isinstance(node.value, (cst.List, cst.Tuple)):
                 for el in node.value.elements:
-                    if isinstance(el.element, cst.SimpleString):
-                        self.function_returns[self._current_function].append(el.element.evaluated_value)
-                    elif isinstance(el.element, cst.Name) and el.element.value == "END":
+                    if isinstance(el.value, cst.SimpleString):
+                        self.function_returns[self._current_function].append(el.value.evaluated_value)
+                    elif isinstance(el.value, cst.Name) and el.value.value == "END":
                         self.function_returns[self._current_function].append("__end__")
 
             # 4. Dict return (state updates)
@@ -431,18 +513,17 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
                 # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
-                    src = node.args[0].value
-                    dst = node.args[1].value
-                    src_val = src.evaluated_value if isinstance(src, cst.SimpleString) else ("__start__" if isinstance(src, cst.Name) and src.value == "START" else None)
-                    dst_val = dst.evaluated_value if isinstance(dst, cst.SimpleString) else ("__end__" if isinstance(dst, cst.Name) and dst.value == "END" else None)
+                    src_vals = resolve_node_values(node.args[0].value)
+                    dst_vals = resolve_node_values(node.args[1].value)
 
-                    if src_val and dst_val:
-                        if src_val == "__start__":
-                            self.entry_point = dst_val
-                            self.scope_entry_points[self._current_function] = dst_val
-                        else:
-                            self.edges.append((src_val, dst_val))
-                            self.scope_edges.setdefault(self._current_function, []).append((src_val, dst_val))
+                    for src_val in src_vals:
+                        for dst_val in dst_vals:
+                            if src_val == "__start__":
+                                self.entry_point = dst_val
+                                self.scope_entry_points[self._current_function] = dst_val
+                            else:
+                                self.edges.append((src_val, dst_val))
+                                self.scope_edges.setdefault(self._current_function, []).append((src_val, dst_val))
 
                 # set_entry_point
                 elif method_name == "set_entry_point" and len(node.args) >= 1:
@@ -777,17 +858,33 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
                 
-                match_src = (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src) or \
-                            (isinstance(arg0, cst.Name) and arg0.value == "START" and self.src == "__start__")
-                
-                match_dst = False
-                if isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.dst:
-                    match_dst = True
-                elif isinstance(arg1, cst.Name) and arg1.value == "END" and self.dst == "__end__":
-                    match_dst = True
-                
-                if match_src and match_dst:
-                    return cst.RemoveFromParent()
+                if node_contains_value(arg0, self.src) and node_contains_value(arg1, self.dst):
+                    is_src_multiple = isinstance(arg0, (cst.List, cst.Tuple))
+                    is_dst_multiple = isinstance(arg1, (cst.List, cst.Tuple))
+                    
+                    if not is_src_multiple and not is_dst_multiple:
+                        return cst.RemoveFromParent()
+                    
+                    new_args = list(call.args)
+                    if is_src_multiple and not is_dst_multiple:
+                        new_src = remove_value_from_node(arg0, self.src)
+                        if new_src is None:
+                            return cst.RemoveFromParent()
+                        new_args[0] = call.args[0].with_changes(value=new_src)
+                    elif is_dst_multiple and not is_src_multiple:
+                        new_dst = remove_value_from_node(arg1, self.dst)
+                        if new_dst is None:
+                            return cst.RemoveFromParent()
+                        new_args[1] = call.args[1].with_changes(value=new_dst)
+                    else:
+                        new_src = remove_value_from_node(arg0, self.src)
+                        if new_src is None:
+                            return cst.RemoveFromParent()
+                        new_args[0] = call.args[0].with_changes(value=new_src)
+                    
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 2. Handle any_graph.add_conditional_edges(...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
@@ -856,11 +953,23 @@ class RemoveNodeTransformer(cst.CSTTransformer):
             if len(call.args) >= 2:
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
-                match_src = isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.node_id
-                match_dst = (isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.node_id) or \
-                            (isinstance(arg1, cst.Name) and arg1.value == "END" and self.node_id == "__end__")
-                if match_src or match_dst:
-                    return cst.RemoveFromParent()
+                
+                contains_src = node_contains_value(arg0, self.node_id)
+                contains_dst = node_contains_value(arg1, self.node_id)
+                
+                if contains_src or contains_dst:
+                    new_src = remove_value_from_node(arg0, self.node_id)
+                    new_dst = remove_value_from_node(arg1, self.node_id)
+                    
+                    if new_src is None or new_dst is None:
+                        return cst.RemoveFromParent()
+                        
+                    new_args = list(call.args)
+                    new_args[0] = call.args[0].with_changes(value=new_src)
+                    new_args[1] = call.args[1].with_changes(value=new_dst)
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 3. any_graph.add_conditional_edges("node_id", ...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
@@ -1023,8 +1132,9 @@ class RenameNodeTransformer(cst.CSTTransformer):
             changed = False
             for i in range(min(2, len(new_args))):
                 arg = new_args[i].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_args[i] = new_args[i].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_args[i] = new_args[i].with_changes(value=renamed_arg)
                     changed = True
             if changed:
                 return updated_node.with_changes(args=new_args)
@@ -1035,8 +1145,9 @@ class RenameNodeTransformer(cst.CSTTransformer):
             changed = False
             if len(new_args) >= 1:
                 arg = new_args[0].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_args[0] = new_args[0].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_args[0] = new_args[0].with_changes(value=renamed_arg)
                     changed = True
             if changed:
                 return updated_node.with_changes(args=new_args)
@@ -1045,10 +1156,9 @@ class RenameNodeTransformer(cst.CSTTransformer):
         if m.matches(original_node.func, m.Attribute(attr=m.Name("set_entry_point"))):
             if len(updated_node.args) >= 1:
                 arg = updated_node.args[0].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_arg = updated_node.args[0].with_changes(
-                        value=cst.SimpleString(f'"{self.new_id}"')
-                    )
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_arg = updated_node.args[0].with_changes(value=renamed_arg)
                     new_args = list(updated_node.args)
                     new_args[0] = new_arg
                     return updated_node.with_changes(args=new_args)

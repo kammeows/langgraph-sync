@@ -4,7 +4,8 @@
     "first_team": "./agents/agent2.py:graph",
     "second_team": "./agents/agent9.py:graph",
     "third_team": "./agents/agent6.py:graph",
-    "hitl": "./agents/hitl.py:graph"
+    "hitl": "./agents/hitl.py:graph",
+    "parallelization": "./agents/agent11_pllz.py:graph"
   },
   "env": ".env"
 }
