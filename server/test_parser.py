@@ -123,5 +123,48 @@ graph = entry_builder.compile()
             ("question_summarization", "__end__")
         })
 
+    def test_reduce_usecase_parsing(self):
+        reduce_code = """
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send
+
+def generate_topics(state):
+    return {"subjects": ["joke-about-cats"]}
+
+def continue_to_jokes(state):
+    return [Send("generate_joke", {"subject": s}) for s in state["subjects"]]
+
+def generate_joke(state):
+    return {"joke": "hahaha"}
+
+builder = StateGraph(dict)
+builder.add_node("generate_topics", generate_topics)
+builder.add_node("generate_joke", generate_joke)
+builder.add_edge(START, "generate_topics")
+builder.add_conditional_edges(
+    "generate_topics",
+    continue_to_jokes,
+    ["generate_joke"]
+)
+graph = builder.compile()
+"""
+        module = cst.parse_module(reduce_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        self.assertEqual(analyzer.entry_point, "generate_topics")
+        self.assertEqual(set(analyzer.nodes.keys()), {"generate_topics", "generate_joke"})
+        self.assertEqual(len(analyzer.conditional_edges), 1)
+        cond = analyzer.conditional_edges[0]
+        self.assertEqual(cond["source"], "generate_topics")
+        self.assertEqual(cond["router"], "continue_to_jokes")
+        self.assertEqual(cond["mapping"], {"generate_joke": "generate_joke"})
+
 if __name__ == "__main__":
     unittest.main()

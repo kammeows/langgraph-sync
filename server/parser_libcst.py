@@ -122,6 +122,13 @@ def rename_value_in_node(node: cst.CSTNode, old_val: str, new_val: str) -> Tuple
             return node.with_changes(elements=new_elements), True
     return node, False
 
+def extract_send_target(expr: cst.CSTNode) -> Optional[str]:
+    if isinstance(expr, cst.Call):
+        if isinstance(expr.func, cst.Name) and expr.func.value == "Send":
+            if expr.args and isinstance(expr.args[0].value, cst.SimpleString):
+                return expr.args[0].value.evaluated_value
+    return None
+
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
@@ -479,12 +486,28 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         self.function_returns[self._current_function].append(el.value.evaluated_value)
                     elif isinstance(el.value, cst.Name) and el.value.value == "END":
                         self.function_returns[self._current_function].append("__end__")
+                    else:
+                        target = extract_send_target(el.value)
+                        if target:
+                            self.function_returns[self._current_function].append(target)
 
             # 4. Dict return (state updates)
             elif isinstance(node.value, cst.Dict):
                 for el in node.value.elements:
                     if isinstance(el, cst.DictElement) and isinstance(el.key, cst.SimpleString):
                         self.function_update_keys[self._current_function].append(el.key.evaluated_value)
+
+            # 5. ListComp / GeneratorExp return (common for Send)
+            elif isinstance(node.value, (cst.ListComp, cst.GeneratorExp)):
+                target = extract_send_target(node.value.elt)
+                if target:
+                    self.function_returns[self._current_function].append(target)
+
+            # 6. Direct Send call
+            else:
+                target = extract_send_target(node.value)
+                if target:
+                    self.function_returns[self._current_function].append(target)
 
     def visit_Call(self, node: cst.Call):
         # Detect state.get("key")
@@ -552,13 +575,26 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     router_fn = self.resolve_callable_name(raw_router) if raw_router else None
 
                     mapping = {}
-                    if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
-                        for elt in node.args[2].value.elements:
-                            if isinstance(elt, cst.DictElement):
-                                key = elt.key.evaluated_value if isinstance(elt.key, cst.SimpleString) else ("__end__" if isinstance(elt.key, cst.Name) and elt.key.value == "END" else (elt.key.value if isinstance(elt.key, cst.Name) else None))
-                                val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
-                                if key and val:
-                                    mapping[key] = val
+                    if len(node.args) >= 3:
+                        arg2_val = node.args[2].value
+                        if isinstance(arg2_val, cst.Dict):
+                            for elt in arg2_val.elements:
+                                if isinstance(elt, cst.DictElement):
+                                    key = elt.key.evaluated_value if isinstance(elt.key, cst.SimpleString) else ("__end__" if isinstance(elt.key, cst.Name) and elt.key.value == "END" else (elt.key.value if isinstance(elt.key, cst.Name) else None))
+                                    val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
+                                    if key and val:
+                                        mapping[key] = val
+                        elif isinstance(arg2_val, (cst.List, cst.Tuple)):
+                            for elt in arg2_val.elements:
+                                if isinstance(elt.value, cst.SimpleString):
+                                    val = elt.value.evaluated_value
+                                    mapping[val] = val
+                                elif isinstance(elt.value, cst.Name):
+                                    val = elt.value.value
+                                    if val == "END":
+                                        mapping["__end__"] = "__end__"
+                                    else:
+                                        mapping[val] = val
 
                     if not mapping and router_fn == "tools_condition":
                         mapping = {"tools": "tools", "__end__": "__end__"}
@@ -1004,10 +1040,28 @@ class RemoveNodeTransformer(cst.CSTTransformer):
                     return cst.RemoveFromParent()
             
             # Check if mapping dictionary became empty
-            if len(call.args) >= 3 and isinstance(call.args[2].value, cst.Dict):
-                mapping_dict = call.args[2].value
-                if len(mapping_dict.elements) == 0:
-                    return cst.RemoveFromParent()
+            if len(call.args) >= 3:
+                val = call.args[2].value
+                if isinstance(val, cst.Dict):
+                    if len(val.elements) == 0:
+                        return cst.RemoveFromParent()
+                elif isinstance(val, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    for el in val.elements:
+                        if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.node_id:
+                            continue
+                        elif isinstance(el.value, cst.Name) and el.value.value == self.node_id:
+                            continue
+                        else:
+                            new_elements.append(el)
+                    if len(new_elements) == 0:
+                        return cst.RemoveFromParent()
+                    
+                    new_args = list(call.args)
+                    new_args[2] = call.args[2].with_changes(value=val.with_changes(elements=new_elements))
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 4. any_graph.set_entry_point("node_id")
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("set_entry_point"))))])):
@@ -1177,6 +1231,24 @@ class RenameNodeTransformer(cst.CSTTransformer):
                 if arg_changed:
                     new_args[0] = new_args[0].with_changes(value=renamed_arg)
                     changed = True
+            
+            # Handle list/tuple target nodes renaming in the 3rd argument
+            if len(new_args) >= 3:
+                val = new_args[2].value
+                if isinstance(val, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    list_changed = False
+                    for el in val.elements:
+                        renamed_el, el_changed = rename_value_in_node(el.value, self.old_id, self.new_id)
+                        if el_changed:
+                            new_elements.append(el.with_changes(value=renamed_el))
+                            list_changed = True
+                        else:
+                            new_elements.append(el)
+                    if list_changed:
+                        new_args[2] = new_args[2].with_changes(value=val.with_changes(elements=new_elements))
+                        changed = True
+
             if changed:
                 return updated_node.with_changes(args=new_args)
 
