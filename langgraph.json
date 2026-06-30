@@ -9,7 +9,8 @@
     "tools_conditioning": "./agents/tools_condition_usecase.py:graph",
     "hitl": "./agents/hitl.py:graph",
     "parallelization": "./agents/parallelization.py:graph",
-    "subgraph": "./agents/agent12_subgraph.py:graph"
+    "subgraph": "./agents/subgraph_usecase.py:graph",
+    "research_assistant": "./agents/research_assistant.py:graph"
   },
   "env": ".env"
 }
