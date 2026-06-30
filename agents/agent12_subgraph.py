@@ -98,12 +98,12 @@ def clean_logs(state):
 entry_builder = StateGraph(EntryGraphState)
 entry_builder.add_node("clean_logs", clean_logs)
 entry_builder.add_node("question_summarization", qs_builder.compile())
-entry_builder.add_node("failure_analysis", fa_builder.compile())
+entry_builder.add_node("failure_analysissss", fa_builder.compile())
 
 entry_builder.add_edge(START, "clean_logs")
-entry_builder.add_edge("clean_logs", "failure_analysis")
+entry_builder.add_edge("clean_logs", "failure_analysissss")
 entry_builder.add_edge("clean_logs", "question_summarization")
-entry_builder.add_edge("failure_analysis", END)
+entry_builder.add_edge("failure_analysissss", END)
 entry_builder.add_edge("question_summarization", END)
 
 graph = entry_builder.compile()
