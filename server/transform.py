@@ -59,6 +59,10 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 
                 for sub_id, sub_func in sub_nodes.items():
                     is_sub_tool = sub_id and ("tool" in sub_id.lower()) or (sub_func and "tool" in sub_func.lower())
+                    sub_line_info = analyzer.function_lines.get(sub_func) if sub_func else None
+                    sub_input_keys = list(set(analyzer.function_input_keys.get(sub_func, []))) if sub_func else []
+                    sub_output_keys = list(set(analyzer.function_update_keys.get(sub_func, []))) if sub_func else []
+                    
                     sub_react_nodes.append({
                         "id": sub_id,
                         "type": "toolNode" if is_sub_tool else "agentNode",
@@ -66,6 +70,9 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         "data": {
                             "label": sub_id,
                             "functionName": sub_func,
+                            "lines": sub_line_info,
+                            "inputs": sub_input_keys,
+                            "outputs": sub_output_keys,
                             "isEditable": True,
                             "deletable": True
                         }

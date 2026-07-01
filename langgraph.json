@@ -3,9 +3,7 @@
   "graphs": {
     "simple": "./agents/simple.py:graph",
     "import_usecase": "./agents/imports.py:graph",
-    "reduce_usecase": "./agents/reduce_usecase.py:graph",
     "build_agent": "./agents/build_agent_usecase.py:graph",
-    "medical_chatbot": "./agents/medical_chatbot.py:graph",
     "tools_conditioning": "./agents/tools_condition_usecase.py:graph",
     "hitl": "./agents/hitl.py:graph",
     "parallelization": "./agents/parallelization.py:graph",

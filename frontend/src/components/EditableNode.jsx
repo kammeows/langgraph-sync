@@ -5,6 +5,8 @@ const EditableNode = ({ data, id, selected }) => {
   const [label, setLabel] = useState(data.label || id);
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [editingSubNodeId, setEditingSubNodeId] = useState(null);
+  const [subNodeLabel, setSubNodeLabel] = useState("");
 
   // Keep local label in sync with external updates (e.g. from code sync)
   useEffect(() => {
@@ -28,6 +30,18 @@ const EditableNode = ({ data, id, selected }) => {
   const onDelete = () => {
     if (data.onDelete) {
       data.onDelete(id);
+    }
+  };
+
+  const startSubNodeRename = (subNodeId, currentLabel) => {
+    setEditingSubNodeId(subNodeId);
+    setSubNodeLabel(currentLabel);
+  };
+
+  const commitSubNodeRename = (subNodeId) => {
+    setEditingSubNodeId(null);
+    if (data.onSubNodeRename && subNodeLabel !== subNodeId) {
+      data.onSubNodeRename(subNodeId, subNodeLabel);
     }
   };
 
@@ -140,14 +154,57 @@ const EditableNode = ({ data, id, selected }) => {
           <div className="subgraph-preview-flow">
             {data.subgraph.nodes
               .filter(node => node.id !== "__start__" && node.id !== "__end__")
-              .map((node, index) => (
-                <React.Fragment key={node.id}>
-                  {index > 0 && <span className="subgraph-arrow">→</span>}
-                  <span className="subgraph-preview-node">
-                    {node.id}
-                  </span>
-                </React.Fragment>
-              ))
+              .map((node, index) => {
+                const isEditingSub = editingSubNodeId === node.id;
+                return (
+                  <React.Fragment key={node.id}>
+                    {index > 0 && <span className="subgraph-arrow">→</span>}
+                    <span 
+                      className="subgraph-preview-node clickable"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isEditingSub && data.onSubNodeClick) {
+                          data.onSubNodeClick(node);
+                        }
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startSubNodeRename(node.id, node.id);
+                      }}
+                    >
+                      {isEditingSub ? (
+                        <input
+                          className="nodrag subnode-rename-input"
+                          type="text"
+                          value={subNodeLabel}
+                          onChange={(e) => setSubNodeLabel(e.target.value)}
+                          onBlur={() => commitSubNodeRename(node.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitSubNodeRename(node.id);
+                          }}
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <span className="subnode-label">{node.id}</span>
+                          <span 
+                            className="subnode-delete-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (data.onSubNodeDelete) {
+                                data.onSubNodeDelete(node.id);
+                              }
+                            }}
+                          >
+                            &times;
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </React.Fragment>
+                );
+              })
             }
           </div>
         </div>

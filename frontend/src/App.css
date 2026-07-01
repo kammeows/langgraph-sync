@@ -738,3 +738,51 @@ body {
   color: #9ca3af;
   font-weight: bold;
 }
+
+/* Sub-node Interaction Styles */
+.subgraph-preview-node.clickable {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+
+.subgraph-preview-node.clickable:hover {
+  filter: brightness(0.9);
+  border-color: #3b82f6;
+}
+
+.subnode-delete-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 0;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  transition: background 0.2s;
+  line-height: 1;
+}
+
+.subnode-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.subnode-rename-input {
+  font-size: 9px;
+  border: 1px solid #3b82f6;
+  border-radius: 3px;
+  padding: 0px 4px;
+  width: 75px;
+  outline: none;
+  background: #1e1e1e;
+  color: white;
+}

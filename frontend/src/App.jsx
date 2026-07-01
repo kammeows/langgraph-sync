@@ -267,6 +267,17 @@ function App() {
             handlersRef.current?.onRenameNode &&
               handlersRef.current.onRenameNode(id, label);
           },
+          onSubNodeClick: (subNode) => {
+            selectLinesInEditor(subNode);
+          },
+          onSubNodeRename: (id, label) => {
+            handlersRef.current?.onRenameNode &&
+              handlersRef.current.onRenameNode(id, label);
+          },
+          onSubNodeDelete: (id) => {
+            handlersRef.current?.onDeleteNode &&
+              handlersRef.current.onDeleteNode(id);
+          },
         },
       }));
 
