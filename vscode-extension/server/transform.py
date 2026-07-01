@@ -27,10 +27,178 @@ def transform_to_react_flow(analyzer, tool_visitor):
     for node_id, func_name in node_to_function.items():
         is_tool = node_id and ("tool" in node_id.lower()) or (func_name and "tool" in func_name.lower())
         node_type = "toolNode" if is_tool else "agentNode"
-        line_info = analyzer.function_lines.get(func_name) if func_name else None
+        # Resolve builder key for the main node
+        main_builder_var = analyzer.target_builder_key[1] if analyzer.target_builder_key else None
+        main_scope = (analyzer.target_scope, main_builder_var)
+        node_meta = analyzer.node_function_metadata.get((main_scope, node_id))
         
-        input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
-        output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
+        if node_meta:
+            line_info = (node_meta["start_line"], node_meta["end_line"])
+            input_keys = list(set(node_meta["input_keys"]))
+            output_keys = list(set(node_meta["update_keys"]))
+        else:
+            line_info = analyzer.function_lines.get(func_name) if func_name else None
+            input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
+            output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
+        
+        is_subgraph = False
+        subgraph_data = None
+        
+        if node_id in analyzer.subgraph_nodes:
+            builder_var = analyzer.subgraph_nodes[node_id]
+            scope_key = (analyzer.target_scope, builder_var)
+            if scope_key in analyzer.scope_nodes:
+                is_subgraph = True
+                sub_nodes = analyzer.scope_nodes[scope_key]
+                sub_edges = analyzer.scope_edges.get(scope_key, [])
+                sub_cond_edges = analyzer.scope_conditional_edges.get(scope_key, [])
+                sub_entry = analyzer.scope_entry_points.get(scope_key)
+                
+                sub_react_nodes = []
+                sub_react_edges = []
+                sub_y = 100
+                
+                # START node
+                sub_react_nodes.append({
+                    "id": "__start__",
+                    "type": "startNode",
+                    "position": {"x": -100, "y": 100},
+                    "data": {"label": "START"}
+                })
+                
+                for sub_id, sub_func in sub_nodes.items():
+                    is_sub_tool = sub_id and ("tool" in sub_id.lower()) or (sub_func and "tool" in sub_func.lower())
+                    sub_scope = (analyzer.target_scope, builder_var)
+                    sub_meta = analyzer.node_function_metadata.get((sub_scope, sub_id))
+                    
+                    if sub_meta:
+                        sub_line_info = (sub_meta["start_line"], sub_meta["end_line"])
+                        sub_input_keys = list(set(sub_meta["input_keys"]))
+                        sub_output_keys = list(set(sub_meta["update_keys"]))
+                    else:
+                        sub_line_info = analyzer.function_lines.get(sub_func) if sub_func else None
+                        sub_input_keys = list(set(analyzer.function_input_keys.get(sub_func, []))) if sub_func else []
+                        sub_output_keys = list(set(analyzer.function_update_keys.get(sub_func, []))) if sub_func else []
+                    
+                    sub_react_nodes.append({
+                        "id": sub_id,
+                        "type": "toolNode" if is_sub_tool else "agentNode",
+                        "position": {"x": 150, "y": sub_y},
+                        "data": {
+                            "label": sub_id,
+                            "functionName": sub_func,
+                            "lines": sub_line_info,
+                            "inputs": sub_input_keys,
+                            "outputs": sub_output_keys,
+                            "isEditable": True,
+                            "deletable": True
+                        }
+                    })
+                    sub_y += 150
+                    
+                if sub_entry:
+                    sub_react_edges.append({
+                        "id": f"e-__start__-{sub_entry}",
+                        "source": "__start__",
+                        "target": sub_entry,
+                        "animated": True,
+                        "style": {"stroke": "#4caf50", "strokeWidth": 3}
+                    })
+                    
+                sub_node_ids = {n["id"] for n in sub_react_nodes}
+                for sub_src, sub_dst in sub_edges:
+                    target_id = sub_dst
+                    if sub_dst == "__end__":
+                        end_node_id = "__end__"
+                        if not any(n["id"] == end_node_id for n in sub_react_nodes):
+                            sub_react_nodes.append({
+                                "id": end_node_id,
+                                "type": "startNode",
+                                "position": {"x": 400, "y": sub_y},
+                                "data": {"label": "END"}
+                            })
+                            sub_node_ids.add(end_node_id)
+                        target_id = "__end__"
+                    
+                    sub_react_edges.append({
+                        "id": f"e-{sub_src}-{target_id}",
+                        "source": sub_src,
+                        "target": target_id,
+                        "animated": True
+                    })
+                    
+                for sub_cond in sub_cond_edges:
+                    sub_c_src = sub_cond["source"]
+                    sub_c_mapping = sub_cond["mapping"]
+                    for label, target in sub_c_mapping.items():
+                        target_id = target
+                        if target == "__end__":
+                            end_node_id = "__end__"
+                            if not any(n["id"] == end_node_id for n in sub_react_nodes):
+                                sub_react_nodes.append({
+                                    "id": end_node_id,
+                                    "type": "startNode",
+                                    "position": {"x": 400, "y": sub_y},
+                                    "data": {"label": "END"}
+                                })
+                                sub_node_ids.add(end_node_id)
+                            target_id = "__end__"
+                        
+                        sub_react_edges.append({
+                            "id": f"e-{sub_c_src}-{target_id}-cond-{label}",
+                            "source": sub_c_src,
+                            "target": target_id,
+                            "style": {"strokeDasharray": "5"},
+                            "label": f"({label})",
+                            "data": {"condition": label}
+                        })
+                
+                sub_class_name = analyzer.builder_state_classes.get(scope_key, "AgentState")
+                sub_schema_fields = analyzer.builder_state_schemas.get(scope_key, {})
+                sub_state_keys = set(sub_schema_fields.keys())
+                
+                for sub_node in sub_react_nodes:
+                    sub_nid = sub_node["id"]
+                    if sub_nid in ["__start__", "__end__"]:
+                        continue
+                    
+                    sub_outgoing = [e["target"] for e in sub_react_edges if e.get("source") == sub_nid]
+                    sub_incoming = [e["source"] for e in sub_react_edges if e.get("target") == sub_nid]
+                    sub_node["data"]["incoming"] = sub_incoming
+                    sub_node["data"]["outgoing"] = sub_outgoing
+                    
+                    if not sub_outgoing:
+                        warnings.append({
+                            "type": "warning",
+                            "message": f"Node '{sub_nid}' (inside subgraph '{node_id}') has no outgoing edges. It might be a dead end."
+                        })
+                    
+                    sub_func = sub_node["data"].get("functionName")
+                    sub_scope = (analyzer.target_scope, builder_var)
+                    sub_meta = analyzer.node_function_metadata.get((sub_scope, sub_nid))
+                    
+                    if sub_meta:
+                        sub_update_keys = list(set(sub_meta["update_keys"]))
+                    elif sub_func and sub_func in analyzer.function_update_keys:
+                        sub_update_keys = analyzer.function_update_keys[sub_func]
+                    else:
+                        sub_update_keys = []
+                        
+                    for uk in sub_update_keys:
+                        if sub_state_keys and uk not in sub_state_keys:
+                            warnings.append({
+                                "type": "error",
+                                "message": f"Node '{sub_nid}' (inside subgraph '{node_id}') returns key '{uk}', which is not defined in state schema '{sub_class_name}'."
+                            })
+
+                subgraph_data = {
+                    "nodes": sub_react_nodes,
+                    "edges": sub_react_edges,
+                    "state_schema": {
+                        "name": sub_class_name,
+                        "fields": sub_schema_fields
+                    }
+                }
             
         nodes.append({
             "id": node_id,
@@ -43,7 +211,9 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "isEditable": True,
                 "deletable": True,
                 "inputs": input_keys,
-                "outputs": output_keys
+                "outputs": output_keys,
+                "isSubgraph": is_subgraph,
+                "subgraph": subgraph_data
             }
         })
         y_offset += 150
@@ -208,6 +378,18 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         "message": f"Node '{node_id}' returns key '{uk}', which is not defined in state schema '{analyzer.state_class_name or 'AgentState'}'."
                     })
 
+    all_schemas = {}
+    if analyzer.state_class_name:
+        all_schemas[analyzer.state_class_name] = analyzer.state_schema
+    for key, cls_name in analyzer.builder_state_classes.items():
+        if cls_name in analyzer.class_schemas:
+            all_schemas[cls_name] = analyzer.class_schemas[cls_name]
+
+    state_schemas = [
+        {"name": name, "fields": fields}
+        for name, fields in all_schemas.items()
+    ]
+
     return {
         "nodes": nodes, 
         "edges": edges, 
@@ -215,7 +397,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
         "state_schema": {
             "name": analyzer.state_class_name,
             "fields": analyzer.state_schema
-        }
+        },
+        "state_schemas": state_schemas
     }
 
 if __name__ == "__main__":

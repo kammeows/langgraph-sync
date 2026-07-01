@@ -24,7 +24,7 @@
 
 ## Step-by-Step Setup Guide
 
-You can also simply download the VSIX file in the root folder as an alternative. Take a look at the README_EXTENSION.md for more info.
+Instead of the steps below, you also simply download the VSIX file in the root folder as an alternative. Take a look at the VSCODE_EXTENSION.md for more info.
 
 ### 1. Prerequisites
 
@@ -110,4 +110,3 @@ venv\Scripts\python -m unittest discover -s server -p "test_*.py"
 The suite runs:
 
 - **Parser Tests**: Verifies recursive class schema resolutions when importing `AgentState` across separate files.
-- **Git Tests**: Assures that git statuses, diff generations, and PR push flows perform correctly under mock setups.

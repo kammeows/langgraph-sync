@@ -1,14 +1,18 @@
 # LangGraph Sync Visual Builder
 
-LangChain had released their LangGraph Builder which is a browser based canvas where developers can command click to sketch nodes and edges visually to output code scaffolding. However, it is one time code generator which means once you export the code, you cannot sync it back to the visual canvas to continue building or restructuring. So I built LangSync to pick up from here.
+LangChain had released their LangGraph Builder which is a browser based canvas where developers can command click to sketch nodes and edges visually to output code scaffolding. However, it is a one time code generator which means once you export the code, you cannot sync it back to the visual canvas to continue building or restructuring. So I built LangGraph Sync to pick up from here.
 
-`LangSync` is an interactive web tool designed for visualizing, editing and bidirectionally synchronizing LangGraph workflows in real time. By combining a **React Flow Visual Canvas** and a **Monaco Code Editor** with a **FastAPI LibCST AST Parser**, this tool allows developers to modify graph structures visually or via code validating correctness.
+`LangGraph Sync` is an interactive web tool designed for visualizing, editing and bidirectionally synchronizing LangGraph workflows in real time. By combining a **React Flow Visual Canvas** and a **Monaco Code Editor** with a **FastAPI LibCST AST Parser**, this tool allows developers to modify graph structures visually or via code validating correctness.
 
 When a developer uses LangGraph Studio, it monitors local file changes, and whenever code is modified in VS Code or Cursor, it automatically recompiles the graph on the canvas. But it cannot write code back to the disk.
 
-If a developer realizes during a test run that they need to add a routing node, insert a conditional edge or remove a broken loop back to an agent, they have to manually find the line numbers in their IDE and type out python methods like .add_node() or .add_conditional_edges(). By introducing bidirectional visual editing, LangSync makes life a little easier. Modifying nodes or drawing edges on React Flow doesn't just change state in the browser but mutates the underlying Python script deterministically.
+If a developer realizes during a test run that they need to add a routing node, insert a conditional edge or remove a broken loop back to an agent, they have to manually find the line numbers in their IDE and type out python methods like .add_node() or .add_conditional_edges(). By introducing bidirectional visual editing, LangGraph Sync makes life a little easier. Modifying nodes or drawing edges on React Flow doesn't just change state in the browser but mutates the underlying Python script deterministically.
 
 It is a **two-way live visual editor** that runs next to your standard LangGraph development workflow. You edit the visual graph, your Python source code updates. You edit the Python code, the visual graph updates.
+
+Detail on more complex cases it can handle: [Complex cases](COMPLEX_CASES_README.md)
+Setup guide to help you set the repo up: [Setup Guide](SETUP_GUIDE.md)
+VSCode extension guide: [VS code extension Guide](VSCODE_EXTENSION.md)
 
 ---
 
@@ -173,3 +177,5 @@ graph = builder.compile(
 ```
 
 The parser reads the `interrupt_before` and `interrupt_after` lists in the `.compile()` call. In the UI, any node listed in these lists gets highlighted with an "Interrupt/HITL" status badge. If you rename the node, the parser automatically renames the reference inside the compiler list so your state persistence doesn't break.
+
+Detail on more complex cases it can handle: [Complex cases](COMPLEX_CASES_README.md)

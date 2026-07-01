@@ -1,7 +1,7 @@
 import libcst as cst
 from libcst import matchers as m
 import os
-from typing import Optional, Set, Dict, Any, List
+from typing import Optional, Set, Dict, Any, List, Tuple
 
 def resolve_module_to_file(module_name: str, current_file_path: str, workspace_root: str) -> Optional[str]:
     # Support relative imports
@@ -40,6 +40,107 @@ def extract_callable_name(node: cst.CSTNode) -> Optional[str]:
         return "lambda"
     return None
 
+def resolve_node_values(node: cst.CSTNode) -> List[str]:
+    if isinstance(node, cst.SimpleString):
+        return [node.evaluated_value]
+    elif isinstance(node, cst.Name):
+        if node.value == "START":
+            return ["__start__"]
+        elif node.value == "END":
+            return ["__end__"]
+        else:
+            return [node.value]
+    elif isinstance(node, (cst.List, cst.Tuple)):
+        res = []
+        for el in node.elements:
+            res.extend(resolve_node_values(el.value))
+        return res
+    return []
+
+def node_contains_value(node: cst.CSTNode, target_val: str) -> bool:
+    if isinstance(node, cst.SimpleString):
+        return node.evaluated_value == target_val
+    if isinstance(node, cst.Name):
+        if target_val == "__start__" and node.value == "START":
+            return True
+        if target_val == "__end__" and node.value == "END":
+            return True
+        return node.value == target_val
+    if isinstance(node, (cst.List, cst.Tuple)):
+        return any(node_contains_value(el.value, target_val) for el in node.elements)
+    return False
+
+def remove_value_from_node(node: cst.CSTNode, target_val: str) -> Optional[cst.CSTNode]:
+    if isinstance(node, cst.SimpleString) and node.evaluated_value == target_val:
+        return None
+    if isinstance(node, cst.Name):
+        if target_val == "__start__" and node.value == "START":
+            return None
+        if target_val == "__end__" and node.value == "END":
+            return None
+        if node.value == target_val:
+            return None
+    if isinstance(node, (cst.List, cst.Tuple)):
+        new_elements = []
+        for el in node.elements:
+            new_val = remove_value_from_node(el.value, target_val)
+            if new_val is not None:
+                if new_val is el.value:
+                    new_elements.append(el)
+                else:
+                    new_elements.append(el.with_changes(value=new_val))
+        if not new_elements:
+            return None
+        return node.with_changes(elements=new_elements)
+    return node
+
+def rename_value_in_node(node: cst.CSTNode, old_val: str, new_val: str) -> Tuple[cst.CSTNode, bool]:
+    if isinstance(node, cst.SimpleString) and node.evaluated_value == old_val:
+        return cst.SimpleString(f'"{new_val}"'), True
+    if isinstance(node, cst.Name):
+        if old_val == "__start__" and node.value == "START":
+            if new_val == "__start__":
+                return node, False
+            return cst.SimpleString(f'"{new_val}"'), True
+        if old_val == "__end__" and node.value == "END":
+            if new_val == "__end__":
+                return node, False
+            return cst.SimpleString(f'"{new_val}"'), True
+        if node.value == old_val:
+            return cst.SimpleString(f'"{new_val}"'), True
+    if isinstance(node, (cst.List, cst.Tuple)):
+        new_elements = []
+        changed = False
+        for el in node.elements:
+            renamed_val, val_changed = rename_value_in_node(el.value, old_val, new_val)
+            if val_changed:
+                new_elements.append(el.with_changes(value=renamed_val))
+                changed = True
+            else:
+                new_elements.append(el)
+        if changed:
+            return node.with_changes(elements=new_elements), True
+    return node, False
+
+def extract_send_target(expr: cst.CSTNode) -> Optional[str]:
+    if isinstance(expr, cst.Call):
+        if isinstance(expr.func, cst.Name) and expr.func.value == "Send":
+            if expr.args and isinstance(expr.args[0].value, cst.SimpleString):
+                return expr.args[0].value.evaluated_value
+    return None
+
+def find_builder_var_from_compile_call(node_val: cst.CSTNode) -> Optional[str]:
+    curr = node_val
+    while isinstance(curr, cst.Call):
+        if isinstance(curr.func, cst.Attribute):
+            if curr.func.attr.value == "compile":
+                if isinstance(curr.func.value, cst.Name):
+                    return curr.func.value.value
+            curr = curr.func.value
+        else:
+            break
+    return None
+
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
@@ -57,6 +158,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self.class_schemas = {}
+        self.builder_state_classes = {}
+        self.builder_state_schemas = {}
         
         self.target_var = target_var
         self.graph_var_names = set()
@@ -67,6 +170,10 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.scope_conditional_edges = {}
         self.scope_entry_points = {}
         self.target_scope = None
+        self.target_builder_key = None
+        self.subgraph_nodes = {}
+        self.function_defs = []
+        self.node_function_metadata = {}
         self._all_graph_assignments = []
         self._target_var_found = False
         
@@ -112,9 +219,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
         return name_str
 
-    def _process_prebuilt_agent(self, node: cst.Assign):
+    def _process_prebuilt_agent(self, call_node: cst.Call, var_name: str):
         state_schema_val = None
-        for arg in node.value.args:
+        for arg in call_node.args:
             if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
                 if isinstance(arg.value, cst.Name):
                     state_schema_val = arg.value.value
@@ -134,10 +241,12 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.conditional_edges.append(cond_dict)
 
         self.scope_entry_points[self._current_function] = "agent"
-        self.scope_nodes.setdefault(self._current_function, {})["agent"] = "agent"
-        self.scope_nodes.setdefault(self._current_function, {})["tools"] = "ToolNode"
-        self.scope_edges.setdefault(self._current_function, []).append(("tools", "agent"))
-        self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
+        scope_key = (self._current_function, var_name)
+        self.scope_entry_points[scope_key] = "agent"
+        self.scope_nodes.setdefault(scope_key, {})["agent"] = "agent"
+        self.scope_nodes.setdefault(scope_key, {})["tools"] = "ToolNode"
+        self.scope_edges.setdefault(scope_key, []).append(("tools", "agent"))
+        self.scope_conditional_edges.setdefault(scope_key, []).append(cond_dict)
 
     def visit_Assign(self, node: cst.Assign):
         # Extract target variable name
@@ -147,18 +256,24 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 target_name = target.target.value
                 break
 
-        # Check compile() call
-        is_compile = False
-        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
-            is_compile = True
+        # Check compile() call (handles chained calls like .compile().with_config())
+        builder_name = None
+        if isinstance(node.value, cst.Call):
+            builder_name = find_builder_var_from_compile_call(node.value)
+
+        is_compile = builder_name is not None
+        if builder_name:
             self._all_graph_assignments.append({
                 "type": "compile",
                 "var_name": target_name,
-                "scope": self._current_function
+                "scope": self._current_function,
+                "builder_var": builder_name,
+                "node": node
             })
             if self.target_var and target_name == self.target_var:
                 self._target_var_found = True
                 self.target_scope = self._current_function
+                self.target_builder_key = (self._current_function, builder_name)
 
         # Detect create_agent or create_react_agent
         is_prebuilt_agent = False
@@ -187,7 +302,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             if is_target:
                 self._target_var_found = True
                 self.target_scope = self._current_function
-                self._process_prebuilt_agent(node)
+                self._process_prebuilt_agent(node.value, target_name)
 
         # Detect StateGraph(AgentState)
         elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
@@ -196,6 +311,21 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     var_name = target.target.value
                     self._potential_builders.add(var_name)
                     self.graph_var_names.add(var_name)
+                    
+                    schema_name = None
+                    if node.value.args:
+                        # Check keyword first
+                        for arg in node.value.args:
+                            if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
+                                if isinstance(arg.value, cst.Name):
+                                    schema_name = arg.value.value
+                        # Fallback to first positional argument
+                        if not schema_name:
+                            arg0 = node.value.args[0].value
+                            if isinstance(arg0, cst.Name):
+                                schema_name = arg0.value
+                    if schema_name:
+                        self.builder_state_classes[(self._current_function, var_name)] = schema_name
 
         # Track target scope for local function calls
         elif isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
@@ -307,12 +437,31 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self._function_stack.append(func_name)
         self.functions.append(func_name)
         
-        self.function_returns[func_name] = []
-        self.function_update_keys[func_name] = []
-        self.function_input_keys[func_name] = []
         self._current_function = func_name
         self._state_param_name = None
         self._local_assignments = {}
+        
+        pos = (1, 1)
+        try:
+            p = self.get_metadata(cst.metadata.PositionProvider, node)
+            pos = (p.start.line, p.end.line)
+            self.function_lines[func_name] = pos
+        except Exception:
+            self.function_lines[func_name] = (1, 1)
+
+        active_def = {
+            "name": func_name,
+            "start_line": pos[0],
+            "end_line": pos[1],
+            "update_keys": [],
+            "input_keys": [],
+            "returns": []
+        }
+        self.function_defs.append(active_def)
+
+        self.function_returns[func_name] = active_def["returns"]
+        self.function_update_keys[func_name] = active_def["update_keys"]
+        self.function_input_keys[func_name] = active_def["input_keys"]
         
         if node.params.params:
             first_param = node.params.params[0].name.value
@@ -320,14 +469,6 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 self._state_param_name = node.params.params[1].name.value
             else:
                 self._state_param_name = first_param
-
-        try:
-            pos = self.get_metadata(cst.metadata.PositionProvider, node)
-            start_line = pos.start.line
-            end_line = pos.end.line
-            self.function_lines[func_name] = (start_line, end_line)
-        except Exception:
-            self.function_lines[func_name] = (1, 1)
 
         # Parse decorators for graph registration
         for dec in node.decorators:
@@ -386,16 +527,32 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             # 3. List/Tuple return (for parallel conditional routing)
             elif isinstance(node.value, (cst.List, cst.Tuple)):
                 for el in node.value.elements:
-                    if isinstance(el.element, cst.SimpleString):
-                        self.function_returns[self._current_function].append(el.element.evaluated_value)
-                    elif isinstance(el.element, cst.Name) and el.element.value == "END":
+                    if isinstance(el.value, cst.SimpleString):
+                        self.function_returns[self._current_function].append(el.value.evaluated_value)
+                    elif isinstance(el.value, cst.Name) and el.value.value == "END":
                         self.function_returns[self._current_function].append("__end__")
+                    else:
+                        target = extract_send_target(el.value)
+                        if target:
+                            self.function_returns[self._current_function].append(target)
 
             # 4. Dict return (state updates)
             elif isinstance(node.value, cst.Dict):
                 for el in node.value.elements:
                     if isinstance(el, cst.DictElement) and isinstance(el.key, cst.SimpleString):
                         self.function_update_keys[self._current_function].append(el.key.evaluated_value)
+
+            # 5. ListComp / GeneratorExp return (common for Send)
+            elif isinstance(node.value, (cst.ListComp, cst.GeneratorExp)):
+                target = extract_send_target(node.value.elt)
+                if target:
+                    self.function_returns[self._current_function].append(target)
+
+            # 6. Direct Send call
+            else:
+                target = extract_send_target(node.value)
+                if target:
+                    self.function_returns[self._current_function].append(target)
 
     def visit_Call(self, node: cst.Call):
         # Detect state.get("key")
@@ -416,6 +573,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             method_name = node.func.attr.value
 
             if obj_name in self.graph_var_names:
+                scope_key = (self._current_function, obj_name)
                 # add_node
                 if method_name == "add_node" and len(node.args) >= 2:
                     node_name = None
@@ -427,29 +585,65 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
                     if node_name and function_name:
                         self.nodes[node_name] = function_name
-                        self.scope_nodes.setdefault(self._current_function, {})[node_name] = function_name
+                        self.scope_nodes.setdefault(scope_key, {})[node_name] = function_name
+                        
+                        # Bind lexical function definition using call line number
+                        call_line = 1
+                        try:
+                            p = self.get_metadata(cst.metadata.PositionProvider, node)
+                            call_line = p.start.line
+                        except Exception:
+                            pass
+
+                        f_def = None
+                        base_name = function_name.split(".")[-1] if function_name else ""
+                        for d in reversed(self.function_defs):
+                            d_base_name = d["name"].split(".")[-1]
+                            if d_base_name == base_name and d["start_line"] <= call_line:
+                                f_def = d
+                                break
+                        if not f_def:
+                            for d in reversed(self.function_defs):
+                                d_base_name = d["name"].split(".")[-1]
+                                if d_base_name == base_name:
+                                    f_def = d
+                                    break
+                        if f_def:
+                            self.node_function_metadata[(scope_key, node_name)] = f_def
+
+                        # Detect if node is a compiled subgraph
+                        subgraph_builder = None
+                        if isinstance(node.args[1].value, cst.Call):
+                            subgraph_builder = find_builder_var_from_compile_call(node.args[1].value)
+                        elif isinstance(node.args[1].value, cst.Name):
+                            ref_var = node.args[1].value.value
+                            for assign in self._all_graph_assignments:
+                                if assign["type"] == "compile" and assign["var_name"] == ref_var:
+                                    subgraph_builder = assign["builder_var"]
+                                    break
+                        if subgraph_builder:
+                            self.subgraph_nodes[node_name] = subgraph_builder
 
                 # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
-                    src = node.args[0].value
-                    dst = node.args[1].value
-                    src_val = src.evaluated_value if isinstance(src, cst.SimpleString) else ("__start__" if isinstance(src, cst.Name) and src.value == "START" else None)
-                    dst_val = dst.evaluated_value if isinstance(dst, cst.SimpleString) else ("__end__" if isinstance(dst, cst.Name) and dst.value == "END" else None)
+                    src_vals = resolve_node_values(node.args[0].value)
+                    dst_vals = resolve_node_values(node.args[1].value)
 
-                    if src_val and dst_val:
-                        if src_val == "__start__":
-                            self.entry_point = dst_val
-                            self.scope_entry_points[self._current_function] = dst_val
-                        else:
-                            self.edges.append((src_val, dst_val))
-                            self.scope_edges.setdefault(self._current_function, []).append((src_val, dst_val))
+                    for src_val in src_vals:
+                        for dst_val in dst_vals:
+                            if src_val == "__start__":
+                                self.entry_point = dst_val
+                                self.scope_entry_points[scope_key] = dst_val
+                            else:
+                                self.edges.append((src_val, dst_val))
+                                self.scope_edges.setdefault(scope_key, []).append((src_val, dst_val))
 
                 # set_entry_point
                 elif method_name == "set_entry_point" and len(node.args) >= 1:
                     arg0 = node.args[0].value
                     if isinstance(arg0, cst.SimpleString):
                         self.entry_point = arg0.evaluated_value
-                        self.scope_entry_points[self._current_function] = arg0.evaluated_value
+                        self.scope_entry_points[scope_key] = arg0.evaluated_value
 
                 # add_conditional_edges
                 elif method_name == "add_conditional_edges" and len(node.args) >= 2:
@@ -463,13 +657,26 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     router_fn = self.resolve_callable_name(raw_router) if raw_router else None
 
                     mapping = {}
-                    if len(node.args) >= 3 and isinstance(node.args[2].value, cst.Dict):
-                        for elt in node.args[2].value.elements:
-                            if isinstance(elt, cst.DictElement):
-                                key = elt.key.evaluated_value if isinstance(elt.key, cst.SimpleString) else ("__end__" if isinstance(elt.key, cst.Name) and elt.key.value == "END" else (elt.key.value if isinstance(elt.key, cst.Name) else None))
-                                val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
-                                if key and val:
-                                    mapping[key] = val
+                    if len(node.args) >= 3:
+                        arg2_val = node.args[2].value
+                        if isinstance(arg2_val, cst.Dict):
+                            for elt in arg2_val.elements:
+                                if isinstance(elt, cst.DictElement):
+                                    key = elt.key.evaluated_value if isinstance(elt.key, cst.SimpleString) else ("__end__" if isinstance(elt.key, cst.Name) and elt.key.value == "END" else (elt.key.value if isinstance(elt.key, cst.Name) else None))
+                                    val = elt.value.evaluated_value if isinstance(elt.value, cst.SimpleString) else ("__end__" if isinstance(elt.value, cst.Name) and elt.value.value == "END" else (elt.value.value if isinstance(elt.value, cst.Name) else None))
+                                    if key and val:
+                                        mapping[key] = val
+                        elif isinstance(arg2_val, (cst.List, cst.Tuple)):
+                            for elt in arg2_val.elements:
+                                if isinstance(elt.value, cst.SimpleString):
+                                    val = elt.value.evaluated_value
+                                    mapping[val] = val
+                                elif isinstance(elt.value, cst.Name):
+                                    val = elt.value.value
+                                    if val == "END":
+                                        mapping["__end__"] = "__end__"
+                                    else:
+                                        mapping[val] = val
 
                     if not mapping and router_fn == "tools_condition":
                         mapping = {"tools": "tools", "__end__": "__end__"}
@@ -480,7 +687,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         "mapping": mapping
                     }
                     self.conditional_edges.append(cond_dict)
-                    self.scope_conditional_edges.setdefault(self._current_function, []).append(cond_dict)
+                    self.scope_conditional_edges.setdefault(scope_key, []).append(cond_dict)
 
     def leave_Module(self, original_node: cst.Module):
         # Fallback for builders
@@ -581,6 +788,18 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 self.state_class_name = list(self.class_schemas.keys())[0]
                 self.state_schema = self.class_schemas[self.state_class_name]
 
+        # Resolve builder schemas for all builders
+        for key, cls_name in list(self.builder_state_classes.items()):
+            if cls_name in self.class_schemas:
+                self.builder_state_schemas[key] = self.class_schemas[cls_name]
+            else:
+                self.builder_state_schemas[key] = {}
+
+        # Override main state class and schema for the target builder key
+        if self.target_builder_key and self.target_builder_key in self.builder_state_classes:
+            self.state_class_name = self.builder_state_classes[self.target_builder_key]
+            self.state_schema = self.builder_state_schemas.get(self.target_builder_key, {})
+
         # Resolve empty mappings for conditional edges
         for cond in self.conditional_edges:
             if not cond["mapping"] and cond["router"]:
@@ -592,35 +811,51 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
         # Fallback if target_var was not found in graph assignments
         if self.target_var and not self._target_var_found and self._all_graph_assignments:
-            final_assign = self._all_graph_assignments[-1]
-            if final_assign["type"] == "prebuilt":
-                self._process_prebuilt_agent(final_assign["node"])
-                self.target_scope = final_assign["scope"]
-                if self.target_scope not in self.functions:
-                    self.target_scope = None
-            elif final_assign["type"] == "compile":
-                self.target_scope = final_assign["scope"]
+            # Let's search backward for self.target_var
+            target_assign = None
+            for assign in reversed(self._all_graph_assignments):
+                if assign["var_name"] == self.target_var:
+                    target_assign = assign
+                    break
+            if not target_assign:
+                target_assign = self._all_graph_assignments[-1]
+                
+            if target_assign["type"] == "prebuilt":
+                self.target_builder_key = (target_assign["scope"], target_assign["var_name"])
+                self.target_scope = target_assign["scope"]
+            elif target_assign["type"] == "compile":
+                self.target_builder_key = (target_assign["scope"], target_assign.get("builder_var"))
+                self.target_scope = target_assign["scope"]
 
-        # Resolve target scope if it's not explicitly set by assignment
-        if not self.target_scope:
-            # Fallback: if there's only one scope with nodes, use that as target scope
-            active_scopes = [s for s, nds in self.scope_nodes.items() if nds]
-            if len(active_scopes) == 1:
-                self.target_scope = active_scopes[0]
-            else:
-                self.target_scope = None  # Default to global scope
-        else:
-            # If target_scope was set to a callable name, check if it's actually a local function
-            # If it's not a local function (e.g. create_agent, which is imported), we should use self.target_scope = None
-            if self.target_scope not in self.functions:
-                self.target_scope = None
+        # Resolve target builder key if it's not explicitly set
+        if not self.target_builder_key:
+            if self._all_graph_assignments:
+                for assign in reversed(self._all_graph_assignments):
+                    if assign["type"] == "prebuilt":
+                        self.target_builder_key = (assign["scope"], assign["var_name"])
+                        break
+                    elif assign["type"] == "compile" and assign.get("builder_var"):
+                        self.target_builder_key = (assign["scope"], assign["builder_var"])
+                        break
 
-        # Apply target scope filtering
-        if self.target_scope is not None or any(self.target_scope in d for d in (self.scope_nodes, self.scope_edges, self.scope_conditional_edges, self.scope_entry_points)):
-            self.nodes = self.scope_nodes.get(self.target_scope, {})
-            self.edges = self.scope_edges.get(self.target_scope, [])
-            self.conditional_edges = self.scope_conditional_edges.get(self.target_scope, [])
-            self.entry_point = self.scope_entry_points.get(self.target_scope, None)
+        if not self.target_builder_key:
+            active_keys = [k for k, nds in self.scope_nodes.items() if nds]
+            if len(active_keys) == 1:
+                self.target_builder_key = active_keys[0]
+            elif active_keys:
+                global_keys = [k for k in active_keys if k[0] is None]
+                if global_keys:
+                    self.target_builder_key = global_keys[-1]
+                else:
+                    self.target_builder_key = active_keys[-1]
+
+        # Apply target builder key filtering
+        if self.target_builder_key is not None:
+            self.nodes = self.scope_nodes.get(self.target_builder_key, {})
+            self.edges = self.scope_edges.get(self.target_builder_key, [])
+            self.conditional_edges = self.scope_conditional_edges.get(self.target_builder_key, [])
+            self.entry_point = self.scope_entry_points.get(self.target_builder_key, None)
+            self.target_scope = self.target_builder_key[0]
 
     def _merge_function_meta(self, orig_name: str, alias_name: str, other_analyzer):
         if alias_name not in self.functions:
@@ -777,17 +1012,33 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
                 
-                match_src = (isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.src) or \
-                            (isinstance(arg0, cst.Name) and arg0.value == "START" and self.src == "__start__")
-                
-                match_dst = False
-                if isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.dst:
-                    match_dst = True
-                elif isinstance(arg1, cst.Name) and arg1.value == "END" and self.dst == "__end__":
-                    match_dst = True
-                
-                if match_src and match_dst:
-                    return cst.RemoveFromParent()
+                if node_contains_value(arg0, self.src) and node_contains_value(arg1, self.dst):
+                    is_src_multiple = isinstance(arg0, (cst.List, cst.Tuple))
+                    is_dst_multiple = isinstance(arg1, (cst.List, cst.Tuple))
+                    
+                    if not is_src_multiple and not is_dst_multiple:
+                        return cst.RemoveFromParent()
+                    
+                    new_args = list(call.args)
+                    if is_src_multiple and not is_dst_multiple:
+                        new_src = remove_value_from_node(arg0, self.src)
+                        if new_src is None:
+                            return cst.RemoveFromParent()
+                        new_args[0] = call.args[0].with_changes(value=new_src)
+                    elif is_dst_multiple and not is_src_multiple:
+                        new_dst = remove_value_from_node(arg1, self.dst)
+                        if new_dst is None:
+                            return cst.RemoveFromParent()
+                        new_args[1] = call.args[1].with_changes(value=new_dst)
+                    else:
+                        new_src = remove_value_from_node(arg0, self.src)
+                        if new_src is None:
+                            return cst.RemoveFromParent()
+                        new_args[0] = call.args[0].with_changes(value=new_src)
+                    
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 2. Handle any_graph.add_conditional_edges(...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
@@ -835,6 +1086,28 @@ class RemoveEdgeTransformer(cst.CSTTransformer):
                     return updated_node.with_changes(
                         body=[cst.Expr(value=call.with_changes(args=new_args))]
                     )
+                elif isinstance(arg2, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    for el in arg2.elements:
+                        val_match = False
+                        if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.dst:
+                            val_match = True
+                        elif isinstance(el.value, cst.Name) and el.value.value == "END" and self.dst == "__end__":
+                            val_match = True
+                        
+                        if val_match:
+                            continue
+                        new_elements.append(el)
+                    
+                    if not new_elements:
+                        return cst.RemoveFromParent()
+                    
+                    new_list = arg2.with_changes(elements=new_elements)
+                    new_args = list(call.args)
+                    new_args[2] = call.args[2].with_changes(value=new_list)
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         return updated_node
 
@@ -856,11 +1129,23 @@ class RemoveNodeTransformer(cst.CSTTransformer):
             if len(call.args) >= 2:
                 arg0 = call.args[0].value
                 arg1 = call.args[1].value
-                match_src = isinstance(arg0, cst.SimpleString) and arg0.evaluated_value == self.node_id
-                match_dst = (isinstance(arg1, cst.SimpleString) and arg1.evaluated_value == self.node_id) or \
-                            (isinstance(arg1, cst.Name) and arg1.value == "END" and self.node_id == "__end__")
-                if match_src or match_dst:
-                    return cst.RemoveFromParent()
+                
+                contains_src = node_contains_value(arg0, self.node_id)
+                contains_dst = node_contains_value(arg1, self.node_id)
+                
+                if contains_src or contains_dst:
+                    new_src = remove_value_from_node(arg0, self.node_id)
+                    new_dst = remove_value_from_node(arg1, self.node_id)
+                    
+                    if new_src is None or new_dst is None:
+                        return cst.RemoveFromParent()
+                        
+                    new_args = list(call.args)
+                    new_args[0] = call.args[0].with_changes(value=new_src)
+                    new_args[1] = call.args[1].with_changes(value=new_dst)
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 3. any_graph.add_conditional_edges("node_id", ...)
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("add_conditional_edges"))))])):
@@ -871,10 +1156,28 @@ class RemoveNodeTransformer(cst.CSTTransformer):
                     return cst.RemoveFromParent()
             
             # Check if mapping dictionary became empty
-            if len(call.args) >= 3 and isinstance(call.args[2].value, cst.Dict):
-                mapping_dict = call.args[2].value
-                if len(mapping_dict.elements) == 0:
-                    return cst.RemoveFromParent()
+            if len(call.args) >= 3:
+                val = call.args[2].value
+                if isinstance(val, cst.Dict):
+                    if len(val.elements) == 0:
+                        return cst.RemoveFromParent()
+                elif isinstance(val, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    for el in val.elements:
+                        if isinstance(el.value, cst.SimpleString) and el.value.evaluated_value == self.node_id:
+                            continue
+                        elif isinstance(el.value, cst.Name) and el.value.value == self.node_id:
+                            continue
+                        else:
+                            new_elements.append(el)
+                    if len(new_elements) == 0:
+                        return cst.RemoveFromParent()
+                    
+                    new_args = list(call.args)
+                    new_args[2] = call.args[2].with_changes(value=val.with_changes(elements=new_elements))
+                    return updated_node.with_changes(
+                        body=[cst.Expr(value=call.with_changes(args=new_args))]
+                    )
 
         # 4. any_graph.set_entry_point("node_id")
         if m.matches(updated_node, m.SimpleStatementLine(body=[m.Expr(value=m.Call(func=m.Attribute(attr=m.Name("set_entry_point"))))])):
@@ -931,14 +1234,18 @@ class RemoveEntryPointTransformer(cst.CSTTransformer):
 
         return updated_node
 
-def add_edge_to_code(source_code: str, src: str, dst: str) -> str:
+def add_edge_to_code(source_code: str, src: str, dst: str, target_var: Optional[str] = None) -> str:
     module = cst.parse_module(source_code)
     
-    analyzer = LangGraphAnalyzer()
+    analyzer = LangGraphAnalyzer(target_var=target_var)
     wrapper = cst.metadata.MetadataWrapper(module)
     wrapper.visit(analyzer)
     
-    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+    graph_var = "builder"
+    if analyzer.target_builder_key and analyzer.target_builder_key[1]:
+        graph_var = analyzer.target_builder_key[1]
+    elif analyzer.graph_var_names:
+        graph_var = list(analyzer.graph_var_names)[0]
     
     # Create graph_var.add_edge("src", "dst" or END)
     dst_node = cst.Name("END") if dst == "__end__" else cst.SimpleString(f'"{dst}"')
@@ -1023,8 +1330,9 @@ class RenameNodeTransformer(cst.CSTTransformer):
             changed = False
             for i in range(min(2, len(new_args))):
                 arg = new_args[i].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_args[i] = new_args[i].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_args[i] = new_args[i].with_changes(value=renamed_arg)
                     changed = True
             if changed:
                 return updated_node.with_changes(args=new_args)
@@ -1035,9 +1343,28 @@ class RenameNodeTransformer(cst.CSTTransformer):
             changed = False
             if len(new_args) >= 1:
                 arg = new_args[0].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_args[0] = new_args[0].with_changes(value=cst.SimpleString(f'"{self.new_id}"'))
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_args[0] = new_args[0].with_changes(value=renamed_arg)
                     changed = True
+            
+            # Handle list/tuple target nodes renaming in the 3rd argument
+            if len(new_args) >= 3:
+                val = new_args[2].value
+                if isinstance(val, (cst.List, cst.Tuple)):
+                    new_elements = []
+                    list_changed = False
+                    for el in val.elements:
+                        renamed_el, el_changed = rename_value_in_node(el.value, self.old_id, self.new_id)
+                        if el_changed:
+                            new_elements.append(el.with_changes(value=renamed_el))
+                            list_changed = True
+                        else:
+                            new_elements.append(el)
+                    if list_changed:
+                        new_args[2] = new_args[2].with_changes(value=val.with_changes(elements=new_elements))
+                        changed = True
+
             if changed:
                 return updated_node.with_changes(args=new_args)
 
@@ -1045,10 +1372,9 @@ class RenameNodeTransformer(cst.CSTTransformer):
         if m.matches(original_node.func, m.Attribute(attr=m.Name("set_entry_point"))):
             if len(updated_node.args) >= 1:
                 arg = updated_node.args[0].value
-                if isinstance(arg, cst.SimpleString) and arg.evaluated_value == self.old_id:
-                    new_arg = updated_node.args[0].with_changes(
-                        value=cst.SimpleString(f'"{self.new_id}"')
-                    )
+                renamed_arg, arg_changed = rename_value_in_node(arg, self.old_id, self.new_id)
+                if arg_changed:
+                    new_arg = updated_node.args[0].with_changes(value=renamed_arg)
                     new_args = list(updated_node.args)
                     new_args[0] = new_arg
                     return updated_node.with_changes(args=new_args)
@@ -1122,15 +1448,19 @@ class GraphCallInserter(cst.CSTTransformer):
             return node.with_changes(body=new_body)
         return node
 
-def add_node_to_code(source_code: str, node_name: str, only_add_call: bool = False) -> str:
+def add_node_to_code(source_code: str, node_name: str, only_add_call: bool = False, target_var: Optional[str] = None) -> str:
     module = cst.parse_module(source_code)
     
-    analyzer = LangGraphAnalyzer()
+    analyzer = LangGraphAnalyzer(target_var=target_var)
     wrapper = cst.metadata.MetadataWrapper(module)
     wrapper.visit(analyzer)
     
     state_name = analyzer.state_class_name or "AgentState"
-    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+    graph_var = "builder"
+    if analyzer.target_builder_key and analyzer.target_builder_key[1]:
+        graph_var = analyzer.target_builder_key[1]
+    elif analyzer.graph_var_names:
+        graph_var = list(analyzer.graph_var_names)[0]
 
     call_stmt = cst.SimpleStatementLine(
         body=[
@@ -1317,15 +1647,19 @@ class MergeConditionalEdgeTransformer(cst.CSTTransformer):
                     return updated_node.with_changes(body=[cst.Expr(value=updated_call)])
         return updated_node
 
-def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict) -> str:
+def add_conditional_edge_to_code(source_code: str, source: str, router_fn: str, mapping: dict, target_var: Optional[str] = None) -> str:
     module = cst.parse_module(source_code)
     
-    analyzer = LangGraphAnalyzer()
+    analyzer = LangGraphAnalyzer(target_var=target_var)
     wrapper = cst.metadata.MetadataWrapper(module)
     wrapper.visit(analyzer)
     
     state_name = analyzer.state_class_name or "AgentState"
-    graph_var = list(analyzer.graph_var_names)[0] if analyzer.graph_var_names else "builder"
+    graph_var = "builder"
+    if analyzer.target_builder_key and analyzer.target_builder_key[1]:
+        graph_var = analyzer.target_builder_key[1]
+    elif analyzer.graph_var_names:
+        graph_var = list(analyzer.graph_var_names)[0]
 
     new_body = list(module.body)
     

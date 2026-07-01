@@ -15,7 +15,9 @@ To run the builder, you only need:
 
 ## 📥 Installation
 
-You can install the extension directly from the compiled VSIX file located in the root of this repository:
+You can install the extension directly from the releases section: https://github.com/kammeows/langgraph-sync/releases/tag/v1.0.0
+
+After the download is complete, follow the steps below:
 
 1. Open **VS Code**.
 2. Open the **Extensions** view (`Ctrl + Shift + X` on Windows/Linux or `Cmd + Shift + X` on macOS).

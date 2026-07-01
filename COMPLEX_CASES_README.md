@@ -57,3 +57,16 @@ This guide outlines the specific graph definition edge cases parsed by the libcs
   from my_state import MyState
   ```
 - **How it is handled**: The analyzer parses the import declarations to map module aliases to paths. It then uses the workspace path context to open the remote schema file, parses its classes with libcst, and extracts the field typing declarations so validation checks remain accurate.
+
+---
+
+## 6. Multi-Graph State Schema Tracking
+
+- **Problem**: Different graphs in the same file are constructed with different state schemas (`FailureAnalysisState`, `QuestionSummarizationState`, `EntryGraphState`).
+- **How it is handled**: The analyzer tracks the state schema class individually per builder scope using `self.builder_state_classes` and resolves their type structures to `self.builder_state_schemas`. The graph transformer then validates each node (including sub-nodes inside subgraphs) against the specific state schema defined for its enclosing builder graph.
+
+## 7. Lexical Scope Function Binding (Handling Name Collisions)
+
+- **Problem**: Files like `agents/subgraph_usecase.py` define multiple different functions with the same name (e.g., `generate_summary` for both `fa_builder` and `qs_builder`). A simple name-based dictionary lookup causes the second definition's update keys to override the first, leading to false-positive state validation errors.
+- **How it is handled**: The AST analyzer implements lexical scoping by tracking the line boundaries of all function declarations in `self.function_defs`. When mapping nodes to callables via `add_node`, the analyzer resolves the function definition by selecting the most recent definition starting before the call line. This replicates Python's sequential execution behavior.
+- **Metadata Association**: The lexical mappings are recorded in `self.node_function_metadata[(scope_key, node_name)] = f_def`, which binds the correct `update_keys`, `input_keys`, and line info to each node.

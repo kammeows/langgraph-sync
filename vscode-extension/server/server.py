@@ -252,7 +252,7 @@ def apply_mutation_to_source(
             while f"node{index}" in existing_nodes: index += 1
             new_node_id = f"node{index}"
         
-        return add_node_to_code(source_code, new_node_id, only_add_call=only_add_call)
+        return add_node_to_code(source_code, new_node_id, only_add_call=only_add_call, target_var=target_var)
     
     elif action == "delete_node":
         module = cst.parse_module(source_code)
@@ -272,7 +272,7 @@ def apply_mutation_to_source(
             if (source, target) in analyzer.edges:
                 return source_code
             
-            return add_edge_to_code(source_code, source, target)
+            return add_edge_to_code(source_code, source, target, target_var=target_var)
 
     elif action == "delete_edge":
         module = cst.parse_module(source_code)
@@ -292,7 +292,8 @@ def apply_mutation_to_source(
             source_code, 
             source or payload.get("source"), 
             payload.get("router_fn"), 
-            payload.get("mapping")
+            payload.get("mapping"),
+            target_var=target_var
         )
 
     else:

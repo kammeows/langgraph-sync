@@ -228,8 +228,8 @@ builder = StateGraph(MultiAgentState)
 
 builder.add_node("router", router_node)
 builder.add_node("database_expert", sql_expert_node)
-builder.add_node("lanfhciaanfiuewh", search_expert_node)
-builder.add_node("meow", general_assistant_node)
+builder.add_node("langchain", search_expert_node)
+builder.add_node("assistant", general_assistant_node)
 builder.add_node("human", human_feedback_node)
 builder.add_node("editor", editor_node)
 
@@ -239,15 +239,15 @@ builder.add_conditional_edges(
     "router",
     route_question,
     {
-    "LANGCHAIN": "lanfhciaanfiuewh",
-    "GENERAL": "meow",
+    "LANGCHAIN": "langchain",
+    "GENERAL": "assistant",
     "DATABASE": "database_expert",
 },
 )
 
 builder.add_edge("database_expert", "human")
-builder.add_edge("lanfhciaanfiuewh", "human")
-builder.add_edge("meow", "human")
+builder.add_edge("langchain", "human")
+builder.add_edge("assistant", "human")
 
 builder.add_edge("human", "editor")
 builder.add_edge("editor", END)
