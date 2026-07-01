@@ -10,9 +10,9 @@ If a developer realizes during a test run that they need to add a routing node, 
 
 It is a **two-way live visual editor** that runs next to your standard LangGraph development workflow. You edit the visual graph, your Python source code updates. You edit the Python code, the visual graph updates.
 
-Detail on more complex cases it can handle: [Complex cases](COMPLEX_CASES_README.md)
-Setup guide to help you set the repo up: [Setup Guide](SETUP_GUIDE.md)
-VSCode extension guide: [VS code extension Guide](VSCODE_EXTENSION.md)
+- Detail on more complex cases it can handle: [Complex cases](COMPLEX_CASES_README.md)
+- Setup guide to help you set the repo up: [Setup Guide](SETUP_GUIDE.md)
+- VSCode extension guide: [VS code extension Guide](VSCODE_EXTENSION.md)
 
 ---
 
