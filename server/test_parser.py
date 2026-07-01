@@ -237,5 +237,57 @@ graph = entry_builder.compile()
         sub_nodes = {n["id"] for n in sub_flow["nodes"]}
         self.assertIn("sub_a", sub_nodes)
 
+    def test_multiple_state_schemas_validation(self):
+        multi_state_code = """
+from typing import TypedDict
+from langgraph.graph import StateGraph, START, END
+
+class SubState(TypedDict):
+    sub_key: str
+
+class MainState(TypedDict):
+    main_key: str
+
+sub_builder = StateGraph(SubState)
+def sub_fn(state: SubState):
+    return {"sub_key": "ok"}
+sub_builder.add_node("sub_node", sub_fn)
+sub_builder.add_edge(START, "sub_node")
+sub_builder.add_edge("sub_node", END)
+
+entry_builder = StateGraph(MainState)
+def entry_fn(state: MainState):
+    return {"main_key": "ok"}
+entry_builder.add_node("entry_node", entry_fn)
+entry_builder.add_node("my_sub", sub_builder.compile())
+entry_builder.add_edge(START, "entry_node")
+entry_builder.add_edge("entry_node", "my_sub")
+entry_builder.add_edge("my_sub", END)
+
+graph = entry_builder.compile()
+"""
+        module = cst.parse_module(multi_state_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        self.assertEqual(analyzer.builder_state_classes.get((None, "sub_builder")), "SubState")
+        self.assertEqual(analyzer.builder_state_classes.get((None, "entry_builder")), "MainState")
+
+        from transform import transform_to_react_flow
+        from parser_libcst import ToolCallVisitor
+        tool_visitor = ToolCallVisitor()
+        module.visit(tool_visitor)
+        flow_data = transform_to_react_flow(analyzer, tool_visitor)
+
+        # Confirm there are no validation warnings/errors because each node is validated against its correct schema
+        errors = [w for w in flow_data["warnings"] if w["type"] == "error"]
+        self.assertEqual(len(errors), 0)
+
 if __name__ == "__main__":
     unittest.main()

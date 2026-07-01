@@ -82,6 +82,7 @@ function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [warnings, setWarnings] = useState([]);
   const [stateSchema, setStateSchema] = useState(null);
+  const [stateSchemas, setStateSchemas] = useState([]);
   const [code, setCode] = useState("");
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
   const [isCondModalOpen, setIsCondModalOpen] = useState(false);
@@ -361,6 +362,13 @@ function App() {
       if (data.state_schema) {
         setStateSchema(data.state_schema);
       }
+      if (data.state_schemas) {
+        setStateSchemas(data.state_schemas);
+      } else if (data.state_schema) {
+        setStateSchemas([data.state_schema]);
+      } else {
+        setStateSchemas([]);
+      }
     },
     [
       onRenameEdgeLabel,
@@ -369,6 +377,7 @@ function App() {
       setEdges,
       setWarnings,
       setStateSchema,
+      setStateSchemas,
       showEdgeLabels,
       selectedGraphId,
     ],
@@ -1029,7 +1038,13 @@ function App() {
         </ReactFlow>
 
         <div className="canvas-side-panels">
-          <StateSchemaPanel schema={stateSchema} />
+          {stateSchemas && stateSchemas.length > 0 && (
+            <div className="state-schemas-container">
+              {stateSchemas.map((schema, index) => (
+                <StateSchemaPanel key={schema.name || index} schema={schema} />
+              ))}
+            </div>
+          )}
           <ValidationPanel warnings={warnings} />
         </div>
       </div>

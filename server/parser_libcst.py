@@ -158,6 +158,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.state_class_name = None
         self.state_schema = {} 
         self.class_schemas = {}
+        self.builder_state_classes = {}
+        self.builder_state_schemas = {}
         
         self.target_var = target_var
         self.graph_var_names = set()
@@ -170,6 +172,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.target_scope = None
         self.target_builder_key = None
         self.subgraph_nodes = {}
+        self.function_defs = []
+        self.node_function_metadata = {}
         self._all_graph_assignments = []
         self._target_var_found = False
         
@@ -215,9 +219,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
         return name_str
 
-    def _process_prebuilt_agent(self, node: cst.Assign):
+    def _process_prebuilt_agent(self, call_node: cst.Call, var_name: str):
         state_schema_val = None
-        for arg in node.value.args:
+        for arg in call_node.args:
             if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
                 if isinstance(arg.value, cst.Name):
                     state_schema_val = arg.value.value
@@ -307,6 +311,21 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     var_name = target.target.value
                     self._potential_builders.add(var_name)
                     self.graph_var_names.add(var_name)
+                    
+                    schema_name = None
+                    if node.value.args:
+                        # Check keyword first
+                        for arg in node.value.args:
+                            if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "state_schema":
+                                if isinstance(arg.value, cst.Name):
+                                    schema_name = arg.value.value
+                        # Fallback to first positional argument
+                        if not schema_name:
+                            arg0 = node.value.args[0].value
+                            if isinstance(arg0, cst.Name):
+                                schema_name = arg0.value
+                    if schema_name:
+                        self.builder_state_classes[(self._current_function, var_name)] = schema_name
 
         # Track target scope for local function calls
         elif isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
@@ -418,12 +437,31 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self._function_stack.append(func_name)
         self.functions.append(func_name)
         
-        self.function_returns[func_name] = []
-        self.function_update_keys[func_name] = []
-        self.function_input_keys[func_name] = []
         self._current_function = func_name
         self._state_param_name = None
         self._local_assignments = {}
+        
+        pos = (1, 1)
+        try:
+            p = self.get_metadata(cst.metadata.PositionProvider, node)
+            pos = (p.start.line, p.end.line)
+            self.function_lines[func_name] = pos
+        except Exception:
+            self.function_lines[func_name] = (1, 1)
+
+        active_def = {
+            "name": func_name,
+            "start_line": pos[0],
+            "end_line": pos[1],
+            "update_keys": [],
+            "input_keys": [],
+            "returns": []
+        }
+        self.function_defs.append(active_def)
+
+        self.function_returns[func_name] = active_def["returns"]
+        self.function_update_keys[func_name] = active_def["update_keys"]
+        self.function_input_keys[func_name] = active_def["input_keys"]
         
         if node.params.params:
             first_param = node.params.params[0].name.value
@@ -431,14 +469,6 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 self._state_param_name = node.params.params[1].name.value
             else:
                 self._state_param_name = first_param
-
-        try:
-            pos = self.get_metadata(cst.metadata.PositionProvider, node)
-            start_line = pos.start.line
-            end_line = pos.end.line
-            self.function_lines[func_name] = (start_line, end_line)
-        except Exception:
-            self.function_lines[func_name] = (1, 1)
 
         # Parse decorators for graph registration
         for dec in node.decorators:
@@ -557,6 +587,30 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         self.nodes[node_name] = function_name
                         self.scope_nodes.setdefault(scope_key, {})[node_name] = function_name
                         
+                        # Bind lexical function definition using call line number
+                        call_line = 1
+                        try:
+                            p = self.get_metadata(cst.metadata.PositionProvider, node)
+                            call_line = p.start.line
+                        except Exception:
+                            pass
+
+                        f_def = None
+                        base_name = function_name.split(".")[-1] if function_name else ""
+                        for d in reversed(self.function_defs):
+                            d_base_name = d["name"].split(".")[-1]
+                            if d_base_name == base_name and d["start_line"] <= call_line:
+                                f_def = d
+                                break
+                        if not f_def:
+                            for d in reversed(self.function_defs):
+                                d_base_name = d["name"].split(".")[-1]
+                                if d_base_name == base_name:
+                                    f_def = d
+                                    break
+                        if f_def:
+                            self.node_function_metadata[(scope_key, node_name)] = f_def
+
                         # Detect if node is a compiled subgraph
                         subgraph_builder = None
                         if isinstance(node.args[1].value, cst.Call):
@@ -733,6 +787,18 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             elif self.class_schemas:
                 self.state_class_name = list(self.class_schemas.keys())[0]
                 self.state_schema = self.class_schemas[self.state_class_name]
+
+        # Resolve builder schemas for all builders
+        for key, cls_name in list(self.builder_state_classes.items()):
+            if cls_name in self.class_schemas:
+                self.builder_state_schemas[key] = self.class_schemas[cls_name]
+            else:
+                self.builder_state_schemas[key] = {}
+
+        # Override main state class and schema for the target builder key
+        if self.target_builder_key and self.target_builder_key in self.builder_state_classes:
+            self.state_class_name = self.builder_state_classes[self.target_builder_key]
+            self.state_schema = self.builder_state_schemas.get(self.target_builder_key, {})
 
         # Resolve empty mappings for conditional edges
         for cond in self.conditional_edges:

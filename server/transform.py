@@ -27,10 +27,19 @@ def transform_to_react_flow(analyzer, tool_visitor):
     for node_id, func_name in node_to_function.items():
         is_tool = node_id and ("tool" in node_id.lower()) or (func_name and "tool" in func_name.lower())
         node_type = "toolNode" if is_tool else "agentNode"
-        line_info = analyzer.function_lines.get(func_name) if func_name else None
+        # Resolve builder key for the main node
+        main_builder_var = analyzer.target_builder_key[1] if analyzer.target_builder_key else None
+        main_scope = (analyzer.target_scope, main_builder_var)
+        node_meta = analyzer.node_function_metadata.get((main_scope, node_id))
         
-        input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
-        output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
+        if node_meta:
+            line_info = (node_meta["start_line"], node_meta["end_line"])
+            input_keys = list(set(node_meta["input_keys"]))
+            output_keys = list(set(node_meta["update_keys"]))
+        else:
+            line_info = analyzer.function_lines.get(func_name) if func_name else None
+            input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
+            output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
         
         is_subgraph = False
         subgraph_data = None
@@ -59,9 +68,17 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 
                 for sub_id, sub_func in sub_nodes.items():
                     is_sub_tool = sub_id and ("tool" in sub_id.lower()) or (sub_func and "tool" in sub_func.lower())
-                    sub_line_info = analyzer.function_lines.get(sub_func) if sub_func else None
-                    sub_input_keys = list(set(analyzer.function_input_keys.get(sub_func, []))) if sub_func else []
-                    sub_output_keys = list(set(analyzer.function_update_keys.get(sub_func, []))) if sub_func else []
+                    sub_scope = (analyzer.target_scope, builder_var)
+                    sub_meta = analyzer.node_function_metadata.get((sub_scope, sub_id))
+                    
+                    if sub_meta:
+                        sub_line_info = (sub_meta["start_line"], sub_meta["end_line"])
+                        sub_input_keys = list(set(sub_meta["input_keys"]))
+                        sub_output_keys = list(set(sub_meta["update_keys"]))
+                    else:
+                        sub_line_info = analyzer.function_lines.get(sub_func) if sub_func else None
+                        sub_input_keys = list(set(analyzer.function_input_keys.get(sub_func, []))) if sub_func else []
+                        sub_output_keys = list(set(analyzer.function_update_keys.get(sub_func, []))) if sub_func else []
                     
                     sub_react_nodes.append({
                         "id": sub_id,
@@ -136,9 +153,51 @@ def transform_to_react_flow(analyzer, tool_visitor):
                             "data": {"condition": label}
                         })
                 
+                sub_class_name = analyzer.builder_state_classes.get(scope_key, "AgentState")
+                sub_schema_fields = analyzer.builder_state_schemas.get(scope_key, {})
+                sub_state_keys = set(sub_schema_fields.keys())
+                
+                for sub_node in sub_react_nodes:
+                    sub_nid = sub_node["id"]
+                    if sub_nid in ["__start__", "__end__"]:
+                        continue
+                    
+                    sub_outgoing = [e["target"] for e in sub_react_edges if e.get("source") == sub_nid]
+                    sub_incoming = [e["source"] for e in sub_react_edges if e.get("target") == sub_nid]
+                    sub_node["data"]["incoming"] = sub_incoming
+                    sub_node["data"]["outgoing"] = sub_outgoing
+                    
+                    if not sub_outgoing:
+                        warnings.append({
+                            "type": "warning",
+                            "message": f"Node '{sub_nid}' (inside subgraph '{node_id}') has no outgoing edges. It might be a dead end."
+                        })
+                    
+                    sub_func = sub_node["data"].get("functionName")
+                    sub_scope = (analyzer.target_scope, builder_var)
+                    sub_meta = analyzer.node_function_metadata.get((sub_scope, sub_nid))
+                    
+                    if sub_meta:
+                        sub_update_keys = list(set(sub_meta["update_keys"]))
+                    elif sub_func and sub_func in analyzer.function_update_keys:
+                        sub_update_keys = analyzer.function_update_keys[sub_func]
+                    else:
+                        sub_update_keys = []
+                        
+                    for uk in sub_update_keys:
+                        if sub_state_keys and uk not in sub_state_keys:
+                            warnings.append({
+                                "type": "error",
+                                "message": f"Node '{sub_nid}' (inside subgraph '{node_id}') returns key '{uk}', which is not defined in state schema '{sub_class_name}'."
+                            })
+
                 subgraph_data = {
                     "nodes": sub_react_nodes,
-                    "edges": sub_react_edges
+                    "edges": sub_react_edges,
+                    "state_schema": {
+                        "name": sub_class_name,
+                        "fields": sub_schema_fields
+                    }
                 }
             
         nodes.append({
@@ -319,6 +378,18 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         "message": f"Node '{node_id}' returns key '{uk}', which is not defined in state schema '{analyzer.state_class_name or 'AgentState'}'."
                     })
 
+    all_schemas = {}
+    if analyzer.state_class_name:
+        all_schemas[analyzer.state_class_name] = analyzer.state_schema
+    for key, cls_name in analyzer.builder_state_classes.items():
+        if cls_name in analyzer.class_schemas:
+            all_schemas[cls_name] = analyzer.class_schemas[cls_name]
+
+    state_schemas = [
+        {"name": name, "fields": fields}
+        for name, fields in all_schemas.items()
+    ]
+
     return {
         "nodes": nodes, 
         "edges": edges, 
@@ -326,7 +397,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
         "state_schema": {
             "name": analyzer.state_class_name,
             "fields": analyzer.state_schema
-        }
+        },
+        "state_schemas": state_schemas
     }
 
 if __name__ == "__main__":
