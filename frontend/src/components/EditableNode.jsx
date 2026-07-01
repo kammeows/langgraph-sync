@@ -4,6 +4,7 @@ import { Handle, Position } from "@xyflow/react";
 const EditableNode = ({ data, id, selected }) => {
   const [label, setLabel] = useState(data.label || id);
   const [isEditing, setIsEditing] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Keep local label in sync with external updates (e.g. from code sync)
   useEffect(() => {
@@ -34,7 +35,7 @@ const EditableNode = ({ data, id, selected }) => {
   const isEnd = id === "__end__";
 
   return (
-    <div className={`editable-node-container ${data.type || ''} ${selected ? 'selected' : ''}`}>
+    <div className={`editable-node-container ${data.type || ''} ${selected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`}>
       {/* Target handle at the Top - arrows point HERE */}
       {!isStart && <Handle type="target" position={Position.Top} />}
       
@@ -64,6 +65,16 @@ const EditableNode = ({ data, id, selected }) => {
           </div>
         )}
         
+        {data.isSubgraph && (
+          <button 
+            className="expand-subgraph-btn nodrag" 
+            onClick={() => setIsExpanded(!isExpanded)}
+            title={isExpanded ? "Collapse Subgraph" : "Expand Subgraph"}
+          >
+            ⇳
+          </button>
+        )}
+
         {data.deletable !== false && (
           <button className="delete-node-btn nodrag" onClick={onDelete}>
             &times;
@@ -121,6 +132,26 @@ const EditableNode = ({ data, id, selected }) => {
           </div>
         )}
       </div>
+
+      {/* Subgraph Preview */}
+      {isExpanded && data.subgraph && (
+        <div className="subgraph-preview-container nodrag">
+          <div className="subgraph-preview-title">SUBGRAPH</div>
+          <div className="subgraph-preview-flow">
+            {data.subgraph.nodes
+              .filter(node => node.id !== "__start__" && node.id !== "__end__")
+              .map((node, index) => (
+                <React.Fragment key={node.id}>
+                  {index > 0 && <span className="subgraph-arrow">→</span>}
+                  <span className="subgraph-preview-node">
+                    {node.id}
+                  </span>
+                </React.Fragment>
+              ))
+            }
+          </div>
+        </div>
+      )}
 
       {/* Source handle at the Bottom - arrows start FROM here */}
       {!isEnd && <Handle type="source" position={Position.Bottom} />}

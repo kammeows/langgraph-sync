@@ -31,6 +31,108 @@ def transform_to_react_flow(analyzer, tool_visitor):
         
         input_keys = list(set(analyzer.function_input_keys.get(func_name, []))) if func_name else []
         output_keys = list(set(analyzer.function_update_keys.get(func_name, []))) if func_name else []
+        
+        is_subgraph = False
+        subgraph_data = None
+        
+        if node_id in analyzer.subgraph_nodes:
+            builder_var = analyzer.subgraph_nodes[node_id]
+            scope_key = (analyzer.target_scope, builder_var)
+            if scope_key in analyzer.scope_nodes:
+                is_subgraph = True
+                sub_nodes = analyzer.scope_nodes[scope_key]
+                sub_edges = analyzer.scope_edges.get(scope_key, [])
+                sub_cond_edges = analyzer.scope_conditional_edges.get(scope_key, [])
+                sub_entry = analyzer.scope_entry_points.get(scope_key)
+                
+                sub_react_nodes = []
+                sub_react_edges = []
+                sub_y = 100
+                
+                # START node
+                sub_react_nodes.append({
+                    "id": "__start__",
+                    "type": "startNode",
+                    "position": {"x": -100, "y": 100},
+                    "data": {"label": "START"}
+                })
+                
+                for sub_id, sub_func in sub_nodes.items():
+                    is_sub_tool = sub_id and ("tool" in sub_id.lower()) or (sub_func and "tool" in sub_func.lower())
+                    sub_react_nodes.append({
+                        "id": sub_id,
+                        "type": "toolNode" if is_sub_tool else "agentNode",
+                        "position": {"x": 150, "y": sub_y},
+                        "data": {
+                            "label": sub_id,
+                            "functionName": sub_func,
+                            "isEditable": True,
+                            "deletable": True
+                        }
+                    })
+                    sub_y += 150
+                    
+                if sub_entry:
+                    sub_react_edges.append({
+                        "id": f"e-__start__-{sub_entry}",
+                        "source": "__start__",
+                        "target": sub_entry,
+                        "animated": True,
+                        "style": {"stroke": "#4caf50", "strokeWidth": 3}
+                    })
+                    
+                sub_node_ids = {n["id"] for n in sub_react_nodes}
+                for sub_src, sub_dst in sub_edges:
+                    target_id = sub_dst
+                    if sub_dst == "__end__":
+                        end_node_id = "__end__"
+                        if not any(n["id"] == end_node_id for n in sub_react_nodes):
+                            sub_react_nodes.append({
+                                "id": end_node_id,
+                                "type": "startNode",
+                                "position": {"x": 400, "y": sub_y},
+                                "data": {"label": "END"}
+                            })
+                            sub_node_ids.add(end_node_id)
+                        target_id = "__end__"
+                    
+                    sub_react_edges.append({
+                        "id": f"e-{sub_src}-{target_id}",
+                        "source": sub_src,
+                        "target": target_id,
+                        "animated": True
+                    })
+                    
+                for sub_cond in sub_cond_edges:
+                    sub_c_src = sub_cond["source"]
+                    sub_c_mapping = sub_cond["mapping"]
+                    for label, target in sub_c_mapping.items():
+                        target_id = target
+                        if target == "__end__":
+                            end_node_id = "__end__"
+                            if not any(n["id"] == end_node_id for n in sub_react_nodes):
+                                sub_react_nodes.append({
+                                    "id": end_node_id,
+                                    "type": "startNode",
+                                    "position": {"x": 400, "y": sub_y},
+                                    "data": {"label": "END"}
+                                })
+                                sub_node_ids.add(end_node_id)
+                            target_id = "__end__"
+                        
+                        sub_react_edges.append({
+                            "id": f"e-{sub_c_src}-{target_id}-cond-{label}",
+                            "source": sub_c_src,
+                            "target": target_id,
+                            "style": {"strokeDasharray": "5"},
+                            "label": f"({label})",
+                            "data": {"condition": label}
+                        })
+                
+                subgraph_data = {
+                    "nodes": sub_react_nodes,
+                    "edges": sub_react_edges
+                }
             
         nodes.append({
             "id": node_id,
@@ -43,7 +145,9 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "isEditable": True,
                 "deletable": True,
                 "inputs": input_keys,
-                "outputs": output_keys
+                "outputs": output_keys,
+                "isSubgraph": is_subgraph,
+                "subgraph": subgraph_data
             }
         })
         y_offset += 150

@@ -624,3 +624,117 @@ body {
 .canvas-side-panels > * {
   pointer-events: auto;
 }
+
+/* Expand Subgraph Button */
+.expand-subgraph-btn {
+  background: #aa3bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  margin-right: 4px;
+}
+
+.expand-subgraph-btn:hover {
+  background: #8b2ec4;
+}
+
+/* Subgraph Preview Container */
+.subgraph-preview-container {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 180px;
+}
+
+/* For dark mode preference */
+@media (prefers-color-scheme: dark) {
+  .subgraph-preview-container {
+    border-top-color: #333;
+    background: #181818;
+  }
+}
+
+.subgraph-preview-title {
+  font-size: 8px;
+  font-weight: bold;
+  color: #9ca3af;
+  letter-spacing: 0.5px;
+}
+
+.subgraph-preview-flow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.subgraph-preview-node {
+  font-size: 10px;
+  padding: 2px 5px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e3a8a;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Dark mode overrides for nodes */
+@media (prefers-color-scheme: dark) {
+  .subgraph-preview-node {
+    background: #1e293b;
+    border-color: #3b82f6;
+    color: #93c5fd;
+  }
+}
+
+.subgraph-preview-node.start {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #14532d;
+  border-radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .subgraph-preview-node.start {
+    background: #064e3b;
+    border-color: #059669;
+    color: #a7f3d0;
+  }
+}
+
+.subgraph-preview-node.end {
+  background: #fdf2f2;
+  border-color: #fca5a5;
+  color: #7f1d1d;
+  border-radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .subgraph-preview-node.end {
+    background: #7f1d1d;
+    border-color: #ef4444;
+    color: #fca5a5;
+  }
+}
+
+.subgraph-arrow {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: bold;
+}

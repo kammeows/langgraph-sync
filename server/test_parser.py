@@ -166,5 +166,76 @@ graph = builder.compile()
         self.assertEqual(cond["router"], "continue_to_jokes")
         self.assertEqual(cond["mapping"], {"generate_joke": "generate_joke"})
 
+    def test_chained_compile_parsing(self):
+        chained_code = """
+from langgraph.graph import StateGraph, START, END
+
+builder = StateGraph(dict)
+builder.add_node("node_a", lambda x: x)
+builder.add_edge(START, "node_a")
+builder.add_edge("node_a", END)
+
+graph = builder.compile().with_config(run_name="MyChainedGraph")
+"""
+        module = cst.parse_module(chained_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        self.assertEqual(analyzer.entry_point, "node_a")
+        self.assertEqual(set(analyzer.nodes.keys()), {"node_a"})
+        self.assertEqual(analyzer.target_builder_key, (None, "builder"))
+
+    def test_subgraph_metadata_extraction(self):
+        subgraph_code = """
+from langgraph.graph import StateGraph, START, END
+
+sub_builder = StateGraph(dict)
+sub_builder.add_node("sub_a", lambda x: x)
+sub_builder.add_edge(START, "sub_a")
+sub_builder.add_edge("sub_a", END)
+
+entry_builder = StateGraph(dict)
+entry_builder.add_node("entry_a", lambda x: x)
+entry_builder.add_node("my_sub", sub_builder.compile())
+entry_builder.add_edge(START, "entry_a")
+entry_builder.add_edge("entry_a", "my_sub")
+entry_builder.add_edge("my_sub", END)
+
+graph = entry_builder.compile()
+"""
+        module = cst.parse_module(subgraph_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        from transform import transform_to_react_flow
+        from parser_libcst import ToolCallVisitor
+        tool_visitor = ToolCallVisitor()
+        module.visit(tool_visitor)
+        flow_data = transform_to_react_flow(analyzer, tool_visitor)
+
+        # Verify entry level nodes
+        nodes = flow_data["nodes"]
+        my_sub_node = next((n for n in nodes if n["id"] == "my_sub"), None)
+        self.assertIsNotNone(my_sub_node)
+        self.assertTrue(my_sub_node["data"]["isSubgraph"])
+
+        # Verify internal nodes of the subgraph metadata
+        sub_flow = my_sub_node["data"]["subgraph"]
+        self.assertIsNotNone(sub_flow)
+        sub_nodes = {n["id"] for n in sub_flow["nodes"]}
+        self.assertIn("sub_a", sub_nodes)
+
 if __name__ == "__main__":
     unittest.main()

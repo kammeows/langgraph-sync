@@ -129,6 +129,18 @@ def extract_send_target(expr: cst.CSTNode) -> Optional[str]:
                 return expr.args[0].value.evaluated_value
     return None
 
+def find_builder_var_from_compile_call(node_val: cst.CSTNode) -> Optional[str]:
+    curr = node_val
+    while isinstance(curr, cst.Call):
+        if isinstance(curr.func, cst.Attribute):
+            if curr.func.attr.value == "compile":
+                if isinstance(curr.func.value, cst.Name):
+                    return curr.func.value.value
+            curr = curr.func.value
+        else:
+            break
+    return None
+
 class LangGraphAnalyzer(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (cst.metadata.PositionProvider,)
 
@@ -157,6 +169,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.scope_entry_points = {}
         self.target_scope = None
         self.target_builder_key = None
+        self.subgraph_nodes = {}
         self._all_graph_assignments = []
         self._target_var_found = False
         
@@ -239,11 +252,13 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 target_name = target.target.value
                 break
 
-        # Check compile() call
-        is_compile = False
-        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Attribute) and node.value.func.attr.value == "compile":
-            is_compile = True
-            builder_name = node.value.func.value.value if isinstance(node.value.func.value, cst.Name) else None
+        # Check compile() call (handles chained calls like .compile().with_config())
+        builder_name = None
+        if isinstance(node.value, cst.Call):
+            builder_name = find_builder_var_from_compile_call(node.value)
+
+        is_compile = builder_name is not None
+        if builder_name:
             self._all_graph_assignments.append({
                 "type": "compile",
                 "var_name": target_name,
@@ -541,6 +556,19 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     if node_name and function_name:
                         self.nodes[node_name] = function_name
                         self.scope_nodes.setdefault(scope_key, {})[node_name] = function_name
+                        
+                        # Detect if node is a compiled subgraph
+                        subgraph_builder = None
+                        if isinstance(node.args[1].value, cst.Call):
+                            subgraph_builder = find_builder_var_from_compile_call(node.args[1].value)
+                        elif isinstance(node.args[1].value, cst.Name):
+                            ref_var = node.args[1].value.value
+                            for assign in self._all_graph_assignments:
+                                if assign["type"] == "compile" and assign["var_name"] == ref_var:
+                                    subgraph_builder = assign["builder_var"]
+                                    break
+                        if subgraph_builder:
+                            self.subgraph_nodes[node_name] = subgraph_builder
 
                 # add_edge
                 elif method_name == "add_edge" and len(node.args) >= 2:
