@@ -289,5 +289,83 @@ graph = entry_builder.compile()
         errors = [w for w in flow_data["warnings"] if w["type"] == "error"]
         self.assertEqual(len(errors), 0)
 
+    def test_comet_api_llm_calls(self):
+        code_with_llm = """
+from langgraph.graph import StateGraph
+from typing import TypedDict
+from openai import OpenAI
+
+class State(TypedDict):
+    input: str
+    output: str
+
+comet_client = OpenAI(api_key="mock", base_url="https://api.cometapi.com/v1")
+
+def my_llm_node(state: State):
+    res = comet_client.chat.completions.create(
+        model="deepseek/deepseek-chat",
+        messages=[{"role": "user", "content": state["input"]}]
+    )
+    return {"output": res.choices[0].message.content}
+
+builder = StateGraph(State)
+builder.add_node("llm_node", my_llm_node)
+builder.set_entry_point("llm_node")
+graph = builder.compile()
+"""
+        module = cst.parse_module(code_with_llm)
+        wrapper = cst.metadata.MetadataWrapper(module)
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        self.assertIn("my_llm_node", analyzer.function_llm_calls)
+        calls = analyzer.function_llm_calls["my_llm_node"]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["model"], "deepseek-chat")
+        self.assertEqual(calls[0]["provider"], "DeepSeek")
+        self.assertEqual(calls[0]["raw_model"], "deepseek/deepseek-chat")
+        self.assertTrue(calls[0]["is_comet"])
+
+    def test_langchain_llm_calls(self):
+        langchain_code = """
+from langgraph.graph import StateGraph
+from typing import TypedDict
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+class State(TypedDict):
+    input: str
+    output: str
+
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+def my_langchain_node(state: State):
+    res = llm.invoke(state["input"])
+    return {"output": res.content}
+
+builder = StateGraph(State)
+builder.add_node("lc_node", my_langchain_node)
+builder.set_entry_point("lc_node")
+graph = builder.compile()
+"""
+        module = cst.parse_module(langchain_code)
+        wrapper = cst.metadata.MetadataWrapper(module)
+        analyzer = LangGraphAnalyzer(
+            target_var="graph",
+            current_file_path=os.path.join(self.workspace_root, "main_graph.py"),
+            workspace_root=self.workspace_root
+        )
+        wrapper.visit(analyzer)
+
+        self.assertIn("my_langchain_node", analyzer.function_llm_calls)
+        calls = analyzer.function_llm_calls["my_langchain_node"]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["model"], "gemini-2.5-flash")
+        self.assertEqual(calls[0]["provider"], "Google")
+        self.assertFalse(calls[0]["is_comet"])
+
 if __name__ == "__main__":
     unittest.main()

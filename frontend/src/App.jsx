@@ -18,6 +18,7 @@ import ConditionalRouteModal from "./components/ConditionalRouteModal";
 import PRModal from "./components/PRModal";
 import ValidationPanel from "./components/ValidationPanel";
 import StateSchemaPanel from "./components/StateSchemaPanel";
+import CometLLMInspectorPanel from "./components/CometLLMInspectorPanel";
 
 import "@xyflow/react/dist/style.css";
 import "./App.css";
@@ -98,6 +99,7 @@ function App() {
   const highlightedGraphIdRef = useRef(null);
 
   // AI Copilot and resizable panel states
+  const [selectedNodeInfo, setSelectedNodeInfo] = useState(null);
   const [editorHeightPercent, setEditorHeightPercent] = useState(50);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef(null);
@@ -211,6 +213,7 @@ function App() {
   const onNodeClick = useCallback(
     (event, node) => {
       console.log("Node clicked data:", node.data);
+      setSelectedNodeInfo(node);
       selectLinesInEditor(node);
       if (isEditorCollapsed) setIsEditorCollapsed(false);
     },
@@ -269,6 +272,14 @@ function App() {
               handlersRef.current.onRenameNode(id, label);
           },
           onSubNodeClick: (subNode) => {
+            const subNodeWithData = {
+              id: subNode.id,
+              data: {
+                ...subNode.data,
+                isSubNode: true
+              }
+            };
+            setSelectedNodeInfo(subNodeWithData);
             selectLinesInEditor(subNode);
           },
           onSubNodeRename: (id, label) => {
@@ -344,6 +355,13 @@ function App() {
         ...node,
         selected: node.id === savedSelectedNodeId,
       }));
+
+      const previouslySelected = finalNodes.find((n) => n.selected);
+      if (previouslySelected) {
+        setSelectedNodeInfo(previouslySelected);
+      } else {
+        setSelectedNodeInfo(null);
+      }
 
       // Ensure markerEnd is preserved or re-applied
       const finalEdges = layoutedEdges.map((e) => ({
@@ -869,11 +887,18 @@ function App() {
       if (!selectedGraphId) return;
       const selectedNode = selectedNodes.find((n) => n.selected);
       if (selectedNode) {
+        setSelectedNodeInfo(selectedNode);
         localStorage.setItem(
           `selected-node-${selectedGraphId}`,
           selectedNode.id,
         );
       } else {
+        setSelectedNodeInfo((prev) => {
+          if (prev && !selectedNodes.some(n => n.id === prev.id) && !prev.data?.isSubNode) {
+            return null;
+          }
+          return prev;
+        });
         localStorage.removeItem(`selected-node-${selectedGraphId}`);
       }
     },
@@ -1038,6 +1063,12 @@ function App() {
         </ReactFlow>
 
         <div className="canvas-side-panels">
+          {selectedNodeInfo && (
+            <CometLLMInspectorPanel
+              node={selectedNodeInfo}
+              onClose={() => setSelectedNodeInfo(null)}
+            />
+          )}
           {stateSchemas && stateSchemas.length > 0 && (
             <div className="state-schemas-container">
               {stateSchemas.map((schema, index) => (

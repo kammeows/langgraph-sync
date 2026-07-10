@@ -151,6 +151,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         self.function_returns = {}
         self.function_update_keys = {} 
         self.function_input_keys = {} 
+        self.function_llm_calls = {}
+        self.llm_variables = {}
+        self.comet_clients = set()
         self.nodes = {}
         self.edges = []
         self.conditional_edges = []
@@ -304,8 +307,69 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 self.target_scope = self._current_function
                 self._process_prebuilt_agent(node.value, target_name)
 
+        # Track LLM / Client variables
+        if target_name and isinstance(node.value, cst.Call):
+            cls_name = extract_callable_name(node.value)
+            if cls_name:
+                # 1. Check for OpenAI client instantiation
+                if cls_name == "OpenAI" or cls_name.endswith(".OpenAI"):
+                    is_comet = False
+                    for arg in node.value.args:
+                        if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "base_url":
+                            if isinstance(arg.value, cst.SimpleString) and "cometapi" in arg.value.evaluated_value:
+                                is_comet = True
+                    if is_comet:
+                        if not hasattr(self, "comet_clients"):
+                            self.comet_clients = set()
+                        self.comet_clients.add(target_name)
+                
+                # 2. Check for LangChain or direct LLM classes
+                elif any(x in cls_name for x in ["ChatGoogleGenerativeAI", "ChatOpenAI", "ChatAnthropic", "ChatMistralAI", "ChatCohere", "ChatOllama"]):
+                    model_val = None
+                    for arg in node.value.args:
+                        if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "model":
+                            if isinstance(arg.value, cst.SimpleString):
+                                model_val = arg.value.evaluated_value
+                            elif isinstance(arg.value, cst.Name):
+                                if hasattr(self, "_local_assignments") and arg.value.value in self._local_assignments:
+                                    model_val = self._local_assignments[arg.value.value][0]
+                        elif not arg.keyword and isinstance(arg.value, cst.SimpleString):
+                            model_val = arg.value.evaluated_value
+                    
+                    if not model_val:
+                        if "ChatOpenAI" in cls_name:
+                            model_val = "gpt-4o"
+                        elif "ChatGoogleGenerativeAI" in cls_name:
+                            model_val = "gemini-1.5-pro"
+                        elif "ChatAnthropic" in cls_name:
+                            model_val = "claude-3-5-sonnet"
+                        else:
+                            model_val = "default"
+                            
+                    provider = "Unknown"
+                    if "Google" in cls_name:
+                        provider = "Google"
+                    elif "OpenAI" in cls_name:
+                        provider = "OpenAI"
+                    elif "Anthropic" in cls_name:
+                        provider = "Anthropic"
+                    elif "Mistral" in cls_name:
+                        provider = "Mistral"
+                    elif "Cohere" in cls_name:
+                        provider = "Cohere"
+                    elif "Ollama" in cls_name:
+                        provider = "Ollama"
+                        
+                    if not hasattr(self, "llm_variables"):
+                        self.llm_variables = {}
+                    self.llm_variables[(self._current_function, target_name)] = {
+                        "model": model_val,
+                        "provider": provider,
+                        "class": cls_name
+                    }
+
         # Detect StateGraph(AgentState)
-        elif isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
+        if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
             for target in node.targets:
                 if isinstance(target.target, cst.Name):
                     var_name = target.target.value
@@ -328,7 +392,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         self.builder_state_classes[(self._current_function, var_name)] = schema_name
 
         # Track target scope for local function calls
-        elif isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
+        if isinstance(node.value, cst.Call) and not is_compile and not is_prebuilt_agent:
             raw_callable = extract_callable_name(node.value)
             if raw_callable and self.target_var and target_name == self.target_var:
                 self.target_scope = raw_callable
@@ -555,6 +619,116 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     self.function_returns[self._current_function].append(target)
 
     def visit_Call(self, node: cst.Call):
+        # LLM detection for Comet API and other models
+        if self._current_function:
+            call_expr_str = extract_callable_name(node.func)
+            model_val = None
+            for arg in node.args:
+                if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "model":
+                    if isinstance(arg.value, cst.SimpleString):
+                        model_val = arg.value.evaluated_value
+                    elif isinstance(arg.value, cst.Name):
+                        if hasattr(self, "_local_assignments") and arg.value.value in self._local_assignments:
+                            vals = self._local_assignments[arg.value.value]
+                            if vals:
+                                model_val = vals[0]
+                        else:
+                            model_val = arg.value.value
+            
+            is_llm_call = False
+            provider = "Unknown"
+            is_comet = False
+            
+            if call_expr_str:
+                if any(x in call_expr_str for x in ["chat.completions.create", "completions.create"]):
+                    is_llm_call = True
+                    client_name = call_expr_str.split(".")[0]
+                    scope_client_key = (self._current_function, client_name)
+                    global_client_key = (None, client_name)
+                    comet_clients_set = getattr(self, "comet_clients", set())
+                    if scope_client_key in comet_clients_set or global_client_key in comet_clients_set:
+                        is_comet = True
+                    else:
+                        if "comet" in client_name.lower():
+                            is_comet = True
+                elif "generate_content" in call_expr_str or "generate_text" in call_expr_str:
+                    is_llm_call = True
+                    provider = "Google"
+                elif "invoke" in call_expr_str:
+                    var_name = call_expr_str.split(".")[0]
+                    scope_llm_key = (self._current_function, var_name)
+                    global_llm_key = (None, var_name)
+                    llm_vars = getattr(self, "llm_variables", {})
+                    if scope_llm_key in llm_vars:
+                        is_llm_call = True
+                        var_info = llm_vars[scope_llm_key]
+                        model_val = var_info["model"]
+                        provider = var_info["provider"]
+                    elif global_llm_key in llm_vars:
+                        is_llm_call = True
+                        var_info = llm_vars[global_llm_key]
+                        model_val = var_info["model"]
+                        provider = var_info["provider"]
+                    else:
+                        parts = call_expr_str.split('.')
+                        if parts and any(x in parts[0].lower() for x in ["llm", "model", "gpt", "claude", "client", "chat"]):
+                            is_llm_call = True
+            
+            if not is_llm_call and model_val and call_expr_str and any(x in call_expr_str.lower() for x in ["create", "generate", "complete", "invoke", "call", "run"]):
+                is_llm_call = True
+
+            if is_llm_call:
+                model_str = model_val or "unknown-model"
+                if provider == "Unknown":
+                    if "/" in model_str:
+                        parts = model_str.split("/", 1)
+                        prov_key = parts[0].lower()
+                        if prov_key == "deepseek":
+                            provider = "DeepSeek"
+                        elif prov_key == "openai":
+                            provider = "OpenAI"
+                        elif prov_key == "anthropic":
+                            provider = "Anthropic"
+                        elif prov_key == "google":
+                            provider = "Google"
+                        else:
+                            provider = parts[0].capitalize()
+                        model_str = parts[1]
+                    else:
+                        model_lower = model_str.lower()
+                        if "gpt" in model_lower or "o1" in model_lower or "dall-e" in model_lower:
+                            provider = "OpenAI"
+                        elif "claude" in model_lower:
+                            provider = "Anthropic"
+                        elif "gemini" in model_lower:
+                            provider = "Google"
+                        elif "deepseek" in model_lower:
+                            provider = "DeepSeek"
+                        elif "llama" in model_lower:
+                            provider = "Meta"
+                        elif "qwen" in model_lower:
+                            provider = "Alibaba"
+                        elif "mistral" in model_lower or "mixtral" in model_lower:
+                            provider = "Mistral"
+                        elif "flux" in model_lower:
+                            provider = "Black Forest Labs"
+                        elif "cohere" in model_lower or "command-r" in model_lower:
+                            provider = "Cohere"
+                
+                if not hasattr(self, "function_llm_calls"):
+                    self.function_llm_calls = {}
+                if self._current_function not in self.function_llm_calls:
+                    self.function_llm_calls[self._current_function] = []
+                
+                exists = any(item["model"] == model_str and item["provider"] == provider for item in self.function_llm_calls[self._current_function])
+                if not exists:
+                    self.function_llm_calls[self._current_function].append({
+                        "model": model_str,
+                        "provider": provider,
+                        "raw_model": model_val,
+                        "is_comet": is_comet
+                    })
+
         # Detect state.get("key")
         if self._current_function and self._state_param_name and m.matches(node.func, m.Attribute(value=m.Name(self._state_param_name), attr=m.Name("get"))):
             if node.args and isinstance(node.args[0].value, cst.SimpleString):
@@ -746,6 +920,10 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                     self.class_schemas[cls_name] = schema
                                 for var_name, type_name in imported_analyzer.variable_types.items():
                                     self.variable_types[var_name] = type_name
+                                for k, v in imported_analyzer.llm_variables.items():
+                                    self.llm_variables[k] = v
+                                for k in imported_analyzer.comet_clients:
+                                    self.comet_clients.add(k)
                                     
                             elif target_name is None:
                                 for func in imported_analyzer.functions:
@@ -754,6 +932,10 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                     self.class_schemas[f"{alias}.{cls_name}"] = schema
                                 for var_name, type_name in imported_analyzer.variable_types.items():
                                     self.variable_types[f"{alias}.{var_name}"] = type_name
+                                for k, v in imported_analyzer.llm_variables.items():
+                                    self.llm_variables[f"{alias}.{k}"] = v
+                                for k in imported_analyzer.comet_clients:
+                                    self.comet_clients.add(f"{alias}.{k}")
                                     
                             else:
                                 for func in imported_analyzer.functions:
@@ -769,6 +951,11 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                                 for var_name, type_name in imported_analyzer.variable_types.items():
                                     if var_name == target_name:
                                         self.variable_types[alias] = type_name
+                                        
+                                if target_name in imported_analyzer.llm_variables:
+                                    self.llm_variables[alias] = imported_analyzer.llm_variables[target_name]
+                                if target_name in imported_analyzer.comet_clients:
+                                    self.comet_clients.add(alias)
                                 
                 except Exception as e:
                     print(f"Error recursively parsing {resolved_file}: {e}")
@@ -868,6 +1055,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
             self.function_update_keys[alias_name] = other_analyzer.function_update_keys[orig_name]
         if orig_name in other_analyzer.function_input_keys:
             self.function_input_keys[alias_name] = other_analyzer.function_input_keys[orig_name]
+        if orig_name in other_analyzer.function_llm_calls:
+            self.function_llm_calls[alias_name] = other_analyzer.function_llm_calls[orig_name]
 
 class SetEntryPointTransformer(cst.CSTTransformer):
     def __init__(self, target_id: str, graph_var: str):

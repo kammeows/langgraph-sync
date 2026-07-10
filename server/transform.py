@@ -80,6 +80,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
                         sub_input_keys = list(set(analyzer.function_input_keys.get(sub_func, []))) if sub_func else []
                         sub_output_keys = list(set(analyzer.function_update_keys.get(sub_func, []))) if sub_func else []
                     
+                    sub_llm_calls = analyzer.function_llm_calls.get(sub_func, []) if sub_func else []
                     sub_react_nodes.append({
                         "id": sub_id,
                         "type": "toolNode" if is_sub_tool else "agentNode",
@@ -91,7 +92,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
                             "inputs": sub_input_keys,
                             "outputs": sub_output_keys,
                             "isEditable": True,
-                            "deletable": True
+                            "deletable": True,
+                            "llmCalls": sub_llm_calls
                         }
                     })
                     sub_y += 150
@@ -200,6 +202,7 @@ def transform_to_react_flow(analyzer, tool_visitor):
                     }
                 }
             
+        llm_calls = analyzer.function_llm_calls.get(func_name, []) if func_name else []
         nodes.append({
             "id": node_id,
             "type": node_type,
@@ -213,7 +216,8 @@ def transform_to_react_flow(analyzer, tool_visitor):
                 "inputs": input_keys,
                 "outputs": output_keys,
                 "isSubgraph": is_subgraph,
-                "subgraph": subgraph_data
+                "subgraph": subgraph_data,
+                "llmCalls": llm_calls
             }
         })
         y_offset += 150

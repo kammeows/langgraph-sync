@@ -1,0 +1,257 @@
+.comet-inspector-panel {
+  width: 100%;
+  background-color: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slideIn 0.3s ease-out;
+  overflow: hidden;
+  max-height: 400px;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.comet-inspector-header {
+  padding: 12px 15px;
+  background: linear-gradient(90deg, rgba(37, 37, 38, 0.9) 0%, rgba(45, 45, 48, 0.9) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.comet-inspector-title-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comet-logo-badge {
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.comet-inspector-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #f1f5f9;
+  letter-spacing: 0.2px;
+}
+
+.comet-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.comet-close-btn:hover {
+  color: #ef4444;
+}
+
+.comet-inspector-content {
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.node-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.info-label {
+  color: #94a3b8;
+}
+
+.info-value {
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.info-value.highlight {
+  color: #cbd5e1;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.info-value.code-font {
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 11px;
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #38bdf8;
+}
+
+.section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
+}
+
+.no-llm-calls {
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  padding: 10px;
+  text-align: center;
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  border: 1px dashed rgba(255, 255, 255, 0.05);
+  line-height: 1.4;
+}
+
+.no-llm-calls .info-icon {
+  margin-right: 4px;
+}
+
+.llm-call-card {
+  padding: 10px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.llm-call-card:hover {
+  transform: translateX(2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.llm-call-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.provider-badge {
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gateway-badge {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.gateway-badge.direct {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.model-name-row, .raw-model-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+}
+
+.model-label, .raw-label {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+}
+
+.model-value {
+  color: #f8fafc;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.raw-value {
+  color: #94a3b8;
+  font-family: monospace;
+}
+
+.state-keys-section {
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.keys-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.keys-label {
+  width: 50px;
+  color: #64748b;
+}
+
+.keys-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.key-badge {
+  font-size: 10px;
+  font-family: monospace;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.key-badge.read {
+  background-color: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.key-badge.write {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}

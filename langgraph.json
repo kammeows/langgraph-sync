@@ -8,7 +8,9 @@
     "hitl": "./agents/hitl.py:graph",
     "parallelization": "./agents/parallelization.py:graph",
     "subgraph": "./agents/subgraph_usecase.py:graph",
-    "research_assistant": "./agents/research_assistant.py:graph"
+    "research_assistant": "./agents/research_assistant.py:graph",
+    "comet_multi_agent": "./agents/comet_api_usecases/comet_multi_agent.py:graph",
+    "comet_single_agent": "./agents/comet_api_usecases/comet_single_agent.py:graph"
   },
   "env": ".env"
 }
