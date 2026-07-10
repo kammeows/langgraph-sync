@@ -367,6 +367,40 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         "provider": provider,
                         "class": cls_name
                     }
+                
+                # 3. Check for prebuilt agent creations (like create_react_agent)
+                elif cls_name in ["create_react_agent", "create_agent"] or cls_name.endswith(".create_react_agent") or cls_name.endswith(".create_agent"):
+                    llm_arg_val = None
+                    if node.value.args:
+                        for arg in node.value.args:
+                            if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value in ["model", "llm"]:
+                                llm_arg_val = arg.value
+                                break
+                        if not llm_arg_val and not node.value.args[0].keyword:
+                            llm_arg_val = node.value.args[0].value
+                    
+                    if isinstance(llm_arg_val, cst.Name):
+                        parent_var = llm_arg_val.value
+                        scope_key = (self._current_function, parent_var)
+                        global_key = (None, parent_var)
+                        if not hasattr(self, "llm_variables"):
+                            self.llm_variables = {}
+                        if scope_key in self.llm_variables:
+                            self.llm_variables[(self._current_function, target_name)] = self.llm_variables[scope_key]
+                        elif global_key in self.llm_variables:
+                            self.llm_variables[(self._current_function, target_name)] = self.llm_variables[global_key]
+
+                # 4. Check for method chaining, e.g. structured_llm = llm.with_structured_output(...)
+                elif isinstance(node.value.func, cst.Attribute) and isinstance(node.value.func.value, cst.Name):
+                    parent_var = node.value.func.value.value
+                    scope_key = (self._current_function, parent_var)
+                    global_key = (None, parent_var)
+                    if not hasattr(self, "llm_variables"):
+                        self.llm_variables = {}
+                    if scope_key in self.llm_variables:
+                        self.llm_variables[(self._current_function, target_name)] = self.llm_variables[scope_key]
+                    elif global_key in self.llm_variables:
+                        self.llm_variables[(self._current_function, target_name)] = self.llm_variables[global_key]
 
         # Detect StateGraph(AgentState)
         if isinstance(node.value, cst.Call) and isinstance(node.value.func, cst.Name) and node.value.func.value == "StateGraph":
