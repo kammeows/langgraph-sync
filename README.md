@@ -1,5 +1,7 @@
 # LangGraph Sync Visual Builder
 
+youtube demo: https://youtu.be/hsBONhwr1kM?si=cddp8WCD9fpqQHxs
+
 LangChain had released their LangGraph Builder which is a browser based canvas where developers can command click to sketch nodes and edges visually to output code scaffolding. However, it is a one time code generator which means once you export the code, you cannot sync it back to the visual canvas to continue building or restructuring. So I built LangGraph Sync to pick up from here.
 
 `LangGraph Sync` is an interactive web tool designed for visualizing, editing and bidirectionally synchronizing LangGraph workflows in real time. By combining a **React Flow Visual Canvas** and a **Monaco Code Editor** with a **FastAPI LibCST AST Parser**, this tool allows developers to modify graph structures visually or via code validating correctness.
