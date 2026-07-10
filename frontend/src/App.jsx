@@ -91,6 +91,7 @@ function App() {
   const [graphsList, setGraphsList] = useState([]);
   const [selectedGraphId, setSelectedGraphId] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
+  const [cometModels, setCometModels] = useState([]);
   const editorRef = useRef(null);
   const rawGraphDataRef = useRef(null);
 
@@ -835,6 +836,24 @@ function App() {
     };
   }, [onRenameNode, onDeleteNode, onDeleteEdge, onRenameEdgeLabel]);
 
+  // Fetch Comet API models on app load
+  useEffect(() => {
+    const fetchCometModels = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/api/comet/models");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.models && data.models.length > 0) {
+            setCometModels(data.models);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch Comet models:", error);
+      }
+    };
+    fetchCometModels();
+  }, []);
+
   // Fetch graph whenever selectedGraphId changes
   useEffect(() => {
     if (!selectedGraphId) return;
@@ -1108,6 +1127,7 @@ function App() {
               node={selectedNodeInfo}
               onClose={() => setSelectedNodeInfo(null)}
               onModelChange={handleModifyNodeModel}
+              cometModels={cometModels}
             />
           )}
           {stateSchemas && stateSchemas.length > 0 && (

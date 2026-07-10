@@ -452,6 +452,31 @@ async def copilot_chat(request: CopilotChatRequest):
             "graph": graph_data
         }
 
+@app.get("/api/comet/models")
+async def get_comet_models():
+    import httpx
+    comet_api_key = os.getenv("COMETAPI_KEY")
+    if not comet_api_key:
+        return {"models": []}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.cometapi.com/v1/models",
+                headers={"Authorization": f"Bearer {comet_api_key}"},
+                timeout=10.0
+            )
+            if response.status_code == 200:
+                data = response.json()
+                models_list = data.get("data", [])
+                return {"models": [m.get("id") for m in models_list if m.get("id")]}
+            else:
+                print(f"Failed to fetch models from Comet API: status {response.status_code}")
+                return {"models": []}
+    except Exception as e:
+        print(f"Error fetching Comet API models: {e}")
+        return {"models": []}
+
 # Serve static files from embedded React build if folder exists (as a fallback)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):

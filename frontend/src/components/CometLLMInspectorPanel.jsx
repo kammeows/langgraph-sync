@@ -11,7 +11,7 @@ const COMET_MODELS = [
   { value: "meta-llama/llama-3.1-405b-instruct", label: "Llama 3.1 405B" },
 ];
 
-const CometLLMInspectorPanel = ({ node, onClose, onModelChange }) => {
+const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = [] }) => {
   if (!node) return null;
 
   const {
@@ -25,6 +25,20 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange }) => {
 
   const [editingIndex, setEditingIndex] = useState(null);
   const [customModel, setCustomModel] = useState("");
+
+  const sortedCometModels = cometModels ? [...cometModels].sort() : [];
+  const modelsList = sortedCometModels.length > 0
+    ? sortedCometModels.map(modelId => {
+        let label = modelId;
+        if (modelId.includes("deepseek-chat") || modelId === "deepseek/deepseek-chat") label = "DeepSeek V3";
+        else if (modelId.includes("deepseek-reasoner") || modelId === "deepseek/deepseek-reasoner") label = "DeepSeek R1";
+        else if (modelId.includes("claude-3-5-sonnet") || modelId.includes("claude-3.5-sonnet")) label = "Claude 3.5 Sonnet";
+        else if (modelId.includes("gpt-4o-mini")) label = "GPT-4o Mini";
+        else if (modelId.includes("gpt-4o")) label = "GPT-4o";
+        else if (modelId.includes("gemini-2.5-flash")) label = "Gemini 2.5 Flash";
+        return { value: modelId, label };
+      })
+    : COMET_MODELS;
 
   // Map providers to colors/logos
   const getProviderStyle = (provider) => {
@@ -123,7 +137,7 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange }) => {
               const style = getProviderStyle(call.provider);
               const isCometCall = call.is_comet;
               const fullModelPath = call.raw_model || call.model;
-              const isPredefined = COMET_MODELS.some(m => m.value === fullModelPath);
+              const isPredefined = modelsList.some(m => m.value === fullModelPath);
 
               return (
                 <div
@@ -195,7 +209,7 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange }) => {
                               }
                             }}
                           >
-                            {COMET_MODELS.map((m) => (
+                            {modelsList.map((m) => (
                               <option key={m.value} value={m.value}>
                                 {m.label} ({m.value})
                               </option>
