@@ -1,7 +1,17 @@
-import React from "react";
+import React, { useState } from "react";
 import "./CometLLMInspectorPanel.css";
 
-const CometLLMInspectorPanel = ({ node, onClose }) => {
+const COMET_MODELS = [
+  { value: "deepseek/deepseek-chat", label: "DeepSeek V3" },
+  { value: "deepseek/deepseek-reasoner", label: "DeepSeek R1" },
+  { value: "anthropic/claude-3-5-sonnet", label: "Claude 3.5 Sonnet" },
+  { value: "openai/gpt-4o", label: "GPT-4o" },
+  { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { value: "meta-llama/llama-3.1-405b-instruct", label: "Llama 3.1 405B" },
+];
+
+const CometLLMInspectorPanel = ({ node, onClose, onModelChange }) => {
   if (!node) return null;
 
   const {
@@ -12,6 +22,9 @@ const CometLLMInspectorPanel = ({ node, onClose }) => {
     outputs = [],
   } = node.data || {};
   const hasLLMCalls = llmCalls && llmCalls.length > 0;
+
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [customModel, setCustomModel] = useState("");
 
   // Map providers to colors/logos
   const getProviderStyle = (provider) => {
@@ -108,6 +121,10 @@ const CometLLMInspectorPanel = ({ node, onClose }) => {
           ) : (
             llmCalls.map((call, idx) => {
               const style = getProviderStyle(call.provider);
+              const isCometCall = call.is_comet;
+              const fullModelPath = call.raw_model || call.model;
+              const isPredefined = COMET_MODELS.some(m => m.value === fullModelPath);
+
               return (
                 <div
                   key={idx}
@@ -124,21 +141,88 @@ const CometLLMInspectorPanel = ({ node, onClose }) => {
                     >
                       {style.icon} {call.provider || "Unknown"}
                     </span>
-                    {call.is_comet ? (
+                    {isCometCall ? (
                       <span className="gateway-badge">Comet Gateway</span>
                     ) : (
                       <span className="gateway-badge direct">Direct API</span>
                     )}
                   </div>
-                  <div className="model-name-row">
-                    <span className="model-label">Model:</span>
-                    <span className="model-value">{call.model}</span>
-                  </div>
-                  {call.raw_model && call.raw_model !== call.model && (
-                    <div className="raw-model-row">
-                      <span className="raw-label">Code Ref:</span>
-                      <span className="raw-value">{call.raw_model}</span>
+
+                  {isCometCall ? (
+                    <div className="comet-model-selector-container">
+                      {editingIndex === idx ? (
+                        <div className="custom-model-input-row">
+                          <input
+                            type="text"
+                            className="custom-model-input"
+                            value={customModel}
+                            onChange={(e) => setCustomModel(e.target.value)}
+                            placeholder="e.g. openai/gpt-4o"
+                          />
+                          <button
+                            className="model-action-btn save"
+                            onClick={() => {
+                              if (customModel.trim() && onModelChange) {
+                                onModelChange(functionName, customModel.trim());
+                              }
+                              setEditingIndex(null);
+                            }}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            className="model-action-btn cancel"
+                            onClick={() => setEditingIndex(null)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="model-select-row">
+                          <span className="model-label">Model:</span>
+                          <select
+                            className="inspector-model-select"
+                            value={isPredefined ? fullModelPath : "custom"}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "custom") {
+                                setCustomModel(fullModelPath);
+                                setEditingIndex(idx);
+                              } else {
+                                if (onModelChange) {
+                                  onModelChange(functionName, val);
+                                }
+                              }
+                            }}
+                          >
+                            {COMET_MODELS.map((m) => (
+                              <option key={m.value} value={m.value}>
+                                {m.label} ({m.value})
+                              </option>
+                            ))}
+                            {!isPredefined && (
+                              <option value={fullModelPath}>
+                                Current: {fullModelPath}
+                              </option>
+                            )}
+                            <option value="custom">✏️ Custom Model Path...</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
+                  ) : (
+                    <>
+                      <div className="model-name-row">
+                        <span className="model-label">Model:</span>
+                        <span className="model-value">{call.model}</span>
+                      </div>
+                      {call.raw_model && call.raw_model !== call.model && (
+                        <div className="raw-model-row">
+                          <span className="raw-label">Code Ref:</span>
+                          <span className="raw-value">{call.raw_model}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               );

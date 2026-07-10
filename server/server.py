@@ -21,11 +21,12 @@ from parser_libcst import (
     RenameNodeTransformer, 
     RemoveEdgeTransformer,
     RemoveNodeTransformer,
-    RemoveEntryPointTransformer, # Added
+    RemoveEntryPointTransformer, 
     add_node_to_code,
     add_edge_to_code,
     update_entry_point_in_code,
-    add_conditional_edge_to_code
+    add_conditional_edge_to_code,
+    ChangeNodeModelTransformer
 )
 from transform import transform_to_react_flow
 
@@ -295,6 +296,14 @@ def apply_mutation_to_source(
             payload.get("mapping"),
             target_var=target_var
         )
+
+    elif action == "change_node_model":
+        if not payload or "model" not in payload or "function_name" not in payload:
+            raise HTTPException(status_code=400, detail="Missing payload keys 'model' or 'function_name'")
+        module = cst.parse_module(source_code)
+        transformer = ChangeNodeModelTransformer(payload["function_name"], payload["model"])
+        new_module = module.visit(transformer)
+        return new_module.code
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported mutation action: {action}")

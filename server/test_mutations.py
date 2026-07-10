@@ -393,6 +393,23 @@ graph = builder.compile()
         mutated_all = apply_mutation_to_source(mutated, "delete_edge", source="generate_topics", target="generate_joke")
         self.assertNotIn('add_conditional_edges', mutated_all)
 
+    def test_change_node_model_mutation(self):
+        source_code = """
+def my_node(state):
+    res = client.chat.completions.create(
+        model="deepseek/deepseek-chat",
+        messages=[{"role": "user", "content": "hi"}]
+    )
+    return {"output": res}
+"""
+        mutated = apply_mutation_to_source(
+            source_code,
+            "change_node_model",
+            payload={"function_name": "my_node", "model": "openai/gpt-4o"}
+        )
+        self.assertIn('model="openai/gpt-4o"', mutated)
+        self.assertNotIn('model="deepseek/deepseek-chat"', mutated)
+
 if __name__ == "__main__":
     unittest.main()
 

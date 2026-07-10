@@ -785,6 +785,46 @@ function App() {
     [processGraphStateInternal, setCode, selectedGraphId],
   );
 
+  const handleModifyNodeModel = useCallback(
+    async (functionName, newModel) => {
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "change_node_model",
+            graph_id: selectedGraphId,
+            node_id: selectedNodeInfo?.id,
+            payload: {
+              function_name: functionName,
+              model: newModel,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphStateInternal(data);
+
+          // Update selectedNodeInfo in UI state so it shows updated model immediately
+          if (selectedNodeInfo) {
+            const updatedNode = data.nodes.find((n) => n.id === selectedNodeInfo.id);
+            if (updatedNode) {
+              setSelectedNodeInfo(updatedNode);
+            }
+          }
+        } else {
+          const errData = await response.json();
+          alert(errData.detail || "Failed to update node model.");
+        }
+      } catch (error) {
+        console.error("Failed to update node model:", error);
+      }
+    },
+    [selectedGraphId, selectedNodeInfo, setCode, processGraphStateInternal]
+  );
+
   // Keep the handlers ref updated
   useEffect(() => {
     handlersRef.current = {
@@ -1067,6 +1107,7 @@ function App() {
             <CometLLMInspectorPanel
               node={selectedNodeInfo}
               onClose={() => setSelectedNodeInfo(null)}
+              onModelChange={handleModifyNodeModel}
             />
           )}
           {stateSchemas && stateSchemas.length > 0 && (

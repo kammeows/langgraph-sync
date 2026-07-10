@@ -1092,6 +1092,37 @@ class LangGraphAnalyzer(cst.CSTVisitor):
         if orig_name in other_analyzer.function_llm_calls:
             self.function_llm_calls[alias_name] = other_analyzer.function_llm_calls[orig_name]
 
+class ChangeNodeModelTransformer(cst.CSTTransformer):
+    def __init__(self, function_name: str, new_model: str):
+        self.function_name = function_name
+        self.new_model = new_model
+        self.in_target_function = False
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+        if node.name.value == self.function_name:
+            self.in_target_function = True
+        return True
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
+        if original_node.name.value == self.function_name:
+            self.in_target_function = False
+        return updated_node
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
+        if self.in_target_function:
+            model_arg_idx = -1
+            for idx, arg in enumerate(updated_node.args):
+                if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "model":
+                    model_arg_idx = idx
+                    break
+            
+            if model_arg_idx != -1:
+                new_value = cst.SimpleString(f'"{self.new_model}"')
+                new_args = list(updated_node.args)
+                new_args[model_arg_idx] = updated_node.args[model_arg_idx].with_changes(value=new_value)
+                return updated_node.with_changes(args=new_args)
+        return updated_node
+
 class SetEntryPointTransformer(cst.CSTTransformer):
     def __init__(self, target_id: str, graph_var: str):
         self.target_id = target_id
