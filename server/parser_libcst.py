@@ -326,6 +326,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                 # 2. Check for LangChain or direct LLM classes
                 elif any(x in cls_name for x in ["ChatGoogleGenerativeAI", "ChatOpenAI", "ChatAnthropic", "ChatMistralAI", "ChatCohere", "ChatOllama"]):
                     model_val = None
+                    is_comet_llm = False
                     for arg in node.value.args:
                         if arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "model":
                             if isinstance(arg.value, cst.SimpleString):
@@ -333,6 +334,9 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                             elif isinstance(arg.value, cst.Name):
                                 if hasattr(self, "_local_assignments") and arg.value.value in self._local_assignments:
                                     model_val = self._local_assignments[arg.value.value][0]
+                        elif arg.keyword and isinstance(arg.keyword, cst.Name) and arg.keyword.value == "base_url":
+                            if isinstance(arg.value, cst.SimpleString) and "cometapi" in arg.value.evaluated_value:
+                                is_comet_llm = True
                         elif not arg.keyword and isinstance(arg.value, cst.SimpleString):
                             model_val = arg.value.evaluated_value
                     
@@ -365,7 +369,8 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                     self.llm_variables[(self._current_function, target_name)] = {
                         "model": model_val,
                         "provider": provider,
-                        "class": cls_name
+                        "class": cls_name,
+                        "is_comet": is_comet_llm
                     }
                 
                 # 3. Check for prebuilt agent creations (like create_react_agent)
@@ -698,11 +703,13 @@ class LangGraphAnalyzer(cst.CSTVisitor):
                         var_info = llm_vars[scope_llm_key]
                         model_val = var_info["model"]
                         provider = var_info["provider"]
+                        is_comet = var_info.get("is_comet", False)
                     elif global_llm_key in llm_vars:
                         is_llm_call = True
                         var_info = llm_vars[global_llm_key]
                         model_val = var_info["model"]
                         provider = var_info["provider"]
+                        is_comet = var_info.get("is_comet", False)
                     else:
                         parts = call_expr_str.split('.')
                         if parts and any(x in parts[0].lower() for x in ["llm", "model", "gpt", "claude", "client", "chat"]):
@@ -713,7 +720,7 @@ class LangGraphAnalyzer(cst.CSTVisitor):
 
             if is_llm_call:
                 model_str = model_val or "unknown-model"
-                if provider == "Unknown":
+                if provider in ["Unknown", "OpenAI"]:
                     if "/" in model_str:
                         parts = model_str.split("/", 1)
                         prov_key = parts[0].lower()
@@ -1121,6 +1128,159 @@ class ChangeNodeModelTransformer(cst.CSTTransformer):
                 new_args = list(updated_node.args)
                 new_args[model_arg_idx] = updated_node.args[model_arg_idx].with_changes(value=new_value)
                 return updated_node.with_changes(args=new_args)
+        return updated_node
+
+class AddLLMBoilerplateTransformer(cst.CSTTransformer):
+    def __init__(self, function_name: str, model: str, is_comet: bool = True):
+        self.function_name = function_name
+        self.model = model
+        self.is_comet = is_comet
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
+        if original_node.name.value == self.function_name:
+            if self.is_comet:
+                boilerplate = f"""llm = ChatOpenAI(
+    model="{self.model}",
+    api_key=os.getenv("COMETAPI_KEY"),
+    base_url="https://api.cometapi.com/v1"
+)
+response = llm.invoke("Hello, how can I help you?")
+"""
+            else:
+                if "gemini" in self.model.lower():
+                    boilerplate = f"""llm = ChatGoogleGenerativeAI(
+    model="{self.model}",
+    google_api_key=os.getenv("GEMINI_API_KEY")
+)
+response = llm.invoke("Hello, how can I help you?")
+"""
+                else:
+                    boilerplate = f"""llm = ChatOpenAI(
+    model="{self.model}",
+    api_key=os.getenv("OPENAI_API_KEY")
+)
+response = llm.invoke("Hello, how can I help you?")
+"""
+            
+            body_statements = list(updated_node.body.body)
+            
+            # Filter out simple pass statements
+            body_statements = [
+                s for s in body_statements 
+                if not (isinstance(s, cst.SimpleStatementLine) and len(s.body) == 1 and isinstance(s.body[0], cst.Pass))
+            ]
+            
+            temp_module = cst.parse_module(boilerplate.strip())
+            boilerplate_statements = list(temp_module.body)
+            
+            new_body_statements = boilerplate_statements + body_statements
+            
+            has_return = False
+            for stmt in new_body_statements:
+                if isinstance(stmt, cst.SimpleStatementLine):
+                    for small_stmt in stmt.body:
+                        if isinstance(small_stmt, cst.Return):
+                            has_return = True
+                            break
+                elif isinstance(stmt, cst.Return):
+                    has_return = True
+                    break
+                    
+            if not has_return:
+                new_body_statements.append(cst.parse_statement("return state"))
+                
+            new_body = updated_node.body.with_changes(body=new_body_statements)
+            return updated_node.with_changes(body=new_body)
+            
+        return updated_node
+
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        has_os = False
+        has_llm_class = False
+        
+        target_class_name = "ChatOpenAI"
+        if not self.is_comet and "gemini" in self.model.lower():
+            target_class_name = "ChatGoogleGenerativeAI"
+            
+        for stmt in original_node.body:
+            if isinstance(stmt, cst.SimpleStatementLine):
+                for small_stmt in stmt.body:
+                    if isinstance(small_stmt, cst.Import):
+                        for name in small_stmt.names:
+                            if name.name.value == "os":
+                                has_os = True
+                    elif isinstance(small_stmt, cst.ImportFrom):
+                        if small_stmt.module and isinstance(small_stmt.module, cst.Name):
+                            module_name = small_stmt.module.value
+                        else:
+                            module_name = ""
+                            
+                        if not isinstance(small_stmt.names, cst.ImportStar):
+                            for name in small_stmt.names:
+                                if name.name.value == target_class_name:
+                                    has_llm_class = True
+                                    
+        statements_to_insert = []
+        if not has_os:
+            statements_to_insert.append(cst.parse_statement("import os"))
+        if not has_llm_class:
+            if target_class_name == "ChatOpenAI":
+                statements_to_insert.append(cst.parse_statement("from langchain_openai import ChatOpenAI"))
+            elif target_class_name == "ChatGoogleGenerativeAI":
+                statements_to_insert.append(cst.parse_statement("from langchain_google_genai import ChatGoogleGenerativeAI"))
+                
+        if not statements_to_insert:
+            return updated_node
+            
+        new_body = list(updated_node.body)
+        insert_idx = 0
+        if new_body and isinstance(new_body[0], cst.SimpleStatementLine) and isinstance(new_body[0].body[0], cst.Expr) and isinstance(new_body[0].body[0].value, cst.SimpleString):
+            insert_idx = 1
+            
+        new_body[insert_idx:insert_idx] = statements_to_insert
+        return updated_node.with_changes(body=new_body)
+
+class RemoveLLMInvocationTransformer(cst.CSTTransformer):
+    def __init__(self, function_name: str):
+        self.function_name = function_name
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
+        if original_node.name.value == self.function_name:
+            body_statements = list(updated_node.body.body)
+            new_statements = []
+            
+            for stmt in body_statements:
+                if isinstance(stmt, cst.SimpleStatementLine):
+                    keep_stmt = True
+                    for small_stmt in stmt.body:
+                        # Remove local imports
+                        if isinstance(small_stmt, (cst.Import, cst.ImportFrom)):
+                            keep_stmt = False
+                            break
+                        # Remove llm/response assignments
+                        elif isinstance(small_stmt, cst.Assign):
+                            for target in small_stmt.targets:
+                                if isinstance(target.target, cst.Name) and target.target.value in ["llm", "response"]:
+                                    keep_stmt = False
+                                    break
+                        # Remove standalone calls like llm.invoke(...)
+                        elif isinstance(small_stmt, cst.Expr) and isinstance(small_stmt.value, cst.Call):
+                            call_node = small_stmt.value
+                            if isinstance(call_node.func, cst.Attribute) and isinstance(call_node.func.value, cst.Name) and call_node.func.value.value == "llm":
+                                keep_stmt = False
+                                break
+                    
+                    if keep_stmt:
+                        new_statements.append(stmt)
+                else:
+                    new_statements.append(stmt)
+                    
+            if not new_statements:
+                new_statements.append(cst.parse_statement("pass"))
+                
+            new_body = updated_node.body.with_changes(body=new_statements)
+            return updated_node.with_changes(body=new_body)
+            
         return updated_node
 
 class SetEntryPointTransformer(cst.CSTTransformer):

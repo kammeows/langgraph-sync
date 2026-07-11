@@ -12,7 +12,7 @@ This document outlines the architecture like the backend capabilities and fronte
    - [Prebuilt Agent Interception](#prebuilt-agent-interception)
 3. [Surgical Node-Local Model Mutation](#-surgical-node-local-model-mutation)
 4. [Secure Backend Model Proxy & Fallbacks](#-secure-backend-model-proxy--fallbacks)
-5. [Frontend LLM Inspector Panel](#-frontend-llm-inspector-dashboard)
+5. [Frontend LLM Inspector Panel](#-frontend-llm-inspector-panel)
    - [Gateway vs. Direct Badges](#gateway-vs-direct-badges)
    - [Model Selector Dropdown & Custom Inputs](#model-selector-dropdown--custom-inputs)
    - [Cost & Latency Telemetry Metrics](#cost--latency-telemetry-metrics)
@@ -27,6 +27,8 @@ The **Comet API Integration** extends the LangGraph-Sync platform to parse and d
 - Distinguishing between **Comet API Gateway** calls (routed through the aggregator base URL) and **Direct API** calls (running via native OpenAI/Gemini/Anthropic credentials)
 - Intercepting chained declarations like `.bind_tools(...)` or `.with_structured_output(...)` to resolve model parameters
 - Changing model selections interactively from the UI and applying mutations directly to the source code without restarting the server
+
+Do make sure you have COMETAPI_KEY defined in your .env file.
 
 ---
 

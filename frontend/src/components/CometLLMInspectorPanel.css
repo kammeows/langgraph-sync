@@ -335,3 +335,99 @@
   color: #ef4444;
   border-color: #ef4444;
 }
+
+/* Boilerplate Generator Selector styles */
+.no-llm-calls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.add-boilerplate-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-boilerplate-label {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.add-boilerplate-select {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.add-boilerplate-select:hover, .add-boilerplate-select:focus {
+  border-color: #a855f7;
+}
+
+/* Boilerplate Toggle styles */
+.boilerplate-type-toggle {
+  display: flex;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.boilerplate-type-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.boilerplate-type-btn.active {
+  background: #a855f7;
+  color: white;
+}
+
+.boilerplate-type-btn:hover:not(.active) {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* LLM Deletion styles */
+.llm-call-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delete-llm-btn {
+  background: none;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  line-height: 1;
+}
+
+.delete-llm-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+}

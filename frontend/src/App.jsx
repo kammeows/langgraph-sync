@@ -826,6 +826,84 @@ function App() {
     [selectedGraphId, selectedNodeInfo, setCode, processGraphStateInternal]
   );
 
+  const handleInsertBoilerplate = useCallback(
+    async (functionName, model, isComet) => {
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "add_llm_boilerplate",
+            graph_id: selectedGraphId,
+            payload: {
+              function_name: functionName,
+              model: model,
+              is_comet: isComet,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphStateInternal(data);
+
+          if (selectedNodeInfo) {
+            const updatedNode = data.nodes.find((n) => n.id === selectedNodeInfo.id);
+            if (updatedNode) {
+              setSelectedNodeInfo(updatedNode);
+            }
+          }
+        } else {
+          const errData = await response.json();
+          alert(errData.detail || "Failed to add LLM boilerplate.");
+        }
+      } catch (error) {
+        console.error("Failed to add LLM boilerplate:", error);
+      }
+    },
+    [selectedGraphId, selectedNodeInfo, setCode, processGraphStateInternal]
+  );
+
+  const handleRemoveLLMInvocation = useCallback(
+    async (functionName) => {
+      if (!functionName) return;
+      if (!window.confirm(`Are you sure you want to completely delete the LLM invocation code from function "${functionName}"? This will modify your Python source file.`)) return;
+      try {
+        const response = await fetch("http://localhost:8000/api/graph/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "remove_llm_invocation",
+            graph_id: selectedGraphId,
+            payload: {
+              function_name: functionName,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code !== undefined) setCode(data.code);
+          processGraphStateInternal(data);
+
+          if (selectedNodeInfo) {
+            const updatedNode = data.nodes.find((n) => n.id === selectedNodeInfo.id);
+            if (updatedNode) {
+              setSelectedNodeInfo(updatedNode);
+            }
+          }
+        } else {
+          const errData = await response.json();
+          alert(errData.detail || "Failed to remove LLM invocation.");
+        }
+      } catch (error) {
+        console.error("Failed to remove LLM invocation:", error);
+      }
+    },
+    [selectedGraphId, selectedNodeInfo, setCode, processGraphStateInternal]
+  );
+
   // Keep the handlers ref updated
   useEffect(() => {
     handlersRef.current = {
@@ -1127,6 +1205,8 @@ function App() {
               node={selectedNodeInfo}
               onClose={() => setSelectedNodeInfo(null)}
               onModelChange={handleModifyNodeModel}
+              onAddBoilerplate={handleInsertBoilerplate}
+              onRemoveLLM={handleRemoveLLMInvocation}
               cometModels={cometModels}
             />
           )}

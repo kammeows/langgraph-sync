@@ -305,6 +305,25 @@ def apply_mutation_to_source(
         new_module = module.visit(transformer)
         return new_module.code
 
+    elif action == "add_llm_boilerplate":
+        if not payload or "model" not in payload or "function_name" not in payload:
+            raise HTTPException(status_code=400, detail="Missing payload keys 'model' or 'function_name'")
+        is_comet = payload.get("is_comet", True)
+        module = cst.parse_module(source_code)
+        from parser_libcst import AddLLMBoilerplateTransformer
+        transformer = AddLLMBoilerplateTransformer(payload["function_name"], payload["model"], is_comet)
+        new_module = module.visit(transformer)
+        return new_module.code
+
+    elif action == "remove_llm_invocation":
+        if not payload or "function_name" not in payload:
+            raise HTTPException(status_code=400, detail="Missing payload key 'function_name'")
+        module = cst.parse_module(source_code)
+        from parser_libcst import RemoveLLMInvocationTransformer
+        transformer = RemoveLLMInvocationTransformer(payload["function_name"])
+        new_module = module.visit(transformer)
+        return new_module.code
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported mutation action: {action}")
 

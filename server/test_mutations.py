@@ -410,6 +410,63 @@ def my_node(state):
         self.assertIn('model="openai/gpt-4o"', mutated)
         self.assertNotIn('model="deepseek/deepseek-chat"', mutated)
 
+    def test_add_llm_boilerplate_mutation(self):
+        source_code = """
+def my_node(state):
+    pass
+"""
+        mutated = apply_mutation_to_source(
+            source_code,
+            "add_llm_boilerplate",
+            payload={"function_name": "my_node", "model": "deepseek/deepseek-chat"}
+        )
+        self.assertIn('from langchain_openai import ChatOpenAI', mutated)
+        self.assertNotIn('    from langchain_openai import ChatOpenAI', mutated)
+        self.assertIn('model="deepseek/deepseek-chat"', mutated)
+        self.assertIn('return state', mutated)
+
+    def test_add_llm_boilerplate_direct_mutation(self):
+        source_code = """
+def my_node(state):
+    pass
+"""
+        mutated = apply_mutation_to_source(
+            source_code,
+            "add_llm_boilerplate",
+            payload={"function_name": "my_node", "model": "google/gemini-2.5-flash", "is_comet": False}
+        )
+        self.assertIn('from langchain_google_genai import ChatGoogleGenerativeAI', mutated)
+        self.assertNotIn('    from langchain_google_genai import ChatGoogleGenerativeAI', mutated)
+        self.assertIn('model="google/gemini-2.5-flash"', mutated)
+        self.assertNotIn('base_url="https://api.cometapi.com/v1"', mutated)
+        self.assertIn('return state', mutated)
+
+    def test_remove_llm_invocation_mutation(self):
+        source_code = """
+def my_node(state):
+    import os
+    from langchain_openai import ChatOpenAI
+    
+    llm = ChatOpenAI(
+        model="deepseek/deepseek-chat",
+        api_key=os.getenv("COMETAPI_KEY"),
+        base_url="https://api.cometapi.com/v1"
+    )
+    response = llm.invoke("Hello")
+    print("Keep this log")
+    return state
+"""
+        mutated = apply_mutation_to_source(
+            source_code,
+            "remove_llm_invocation",
+            payload={"function_name": "my_node"}
+        )
+        self.assertNotIn('ChatOpenAI', mutated)
+        self.assertNotIn('llm = ', mutated)
+        self.assertNotIn('response = ', mutated)
+        self.assertIn('print("Keep this log")', mutated)
+        self.assertIn('return state', mutated)
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -71,6 +71,8 @@ const CometLLMInspectorPanel = ({
   node,
   onClose,
   onModelChange,
+  onAddBoilerplate,
+  onRemoveLLM,
   cometModels = [],
 }) => {
   if (!node) return null;
@@ -267,9 +269,36 @@ const CometLLMInspectorPanel = ({
           </div>
 
           {!hasLLMCalls ? (
-            <div className="no-llm-calls">
-              <span className="info-icon">🛈</span> No LLM calls detected in this
-              node's function body.
+            <div className="no-llm-calls-container">
+              <div className="no-llm-calls">
+                <span className="info-icon">🛈</span> No LLM calls detected in this
+                node's function body.
+              </div>
+              {functionName && (
+                <div className="add-boilerplate-box">
+                  <span className="add-boilerplate-label">Add LLM Invocation Boilerplate (via CometAPI):</span>
+                  <select
+                    className="add-boilerplate-select"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val && onAddBoilerplate) {
+                        if (window.confirm(`Add CometAPI invocation boilerplate for "${val}" inside function "${functionName}"?`)) {
+                          onAddBoilerplate(functionName, val, true);
+                        }
+                      }
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="" disabled>-- Select a Model --</option>
+                    {modelsList.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label} ({m.value})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           ) : (
             llmCalls.map((call, idx) => {
@@ -309,11 +338,23 @@ const CometLLMInspectorPanel = ({
                     >
                       {style.icon} {call.provider || "Unknown"}
                     </span>
-                    {isCometCall ? (
-                      <span className="gateway-badge">Comet Gateway</span>
-                    ) : (
-                      <span className="gateway-badge direct">Direct API</span>
-                    )}
+                    <div className="llm-call-header-right">
+                      {isCometCall ? (
+                        <span className="gateway-badge">Comet Gateway</span>
+                      ) : (
+                        <span className="gateway-badge direct">Direct API</span>
+                      )}
+                      <button
+                        type="button"
+                        className="delete-llm-btn"
+                        onClick={() => {
+                          if (onRemoveLLM) onRemoveLLM(functionName);
+                        }}
+                        title="Delete LLM Invocation"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   </div>
 
                   {isCometCall ? (
