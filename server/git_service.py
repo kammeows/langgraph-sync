@@ -175,3 +175,104 @@ def create_pull_request(title: str, body: str) -> Dict[str, Any]:
         except Exception:
             pass
         return {"success": False, "error": str(e)}
+
+def ensure_ai_branch() -> str:
+    """
+    Ensures that we are on an AI feature branch.
+    If the current branch is 'main' or 'master', creates and checkouts a new branch.
+    Returns the active branch name.
+    """
+    status = get_git_status()
+    if not status.get("initialized"):
+        return "main"
+    
+    active_branch = status.get("active_branch")
+    if active_branch in ["main", "master"]:
+        cwd = get_workspace_root()
+        new_branch = f"feature/ai-patch-{uuid.uuid4().hex[:8]}"
+        try:
+            run_git_cmd(["checkout", "-b", new_branch], cwd)
+            return new_branch
+        except Exception as e:
+            print("Failed to checkout new branch:", e)
+    return active_branch
+
+def commit_all_changes(message: str):
+    """
+    Stages and commits all changes in the workspace.
+    Fails silently if there are no changes to commit.
+    """
+    cwd = get_workspace_root()
+    try:
+        run_git_cmd(["add", "."], cwd)
+        run_git_cmd(["commit", "-m", message], cwd)
+    except Exception as e:
+        print("Commit failed (might be no changes):", e)
+
+def create_pr_for_active_branch(title: str, body: str) -> Dict[str, Any]:
+    """
+    Pushes the active branch to remote origin and opens a PR against the default base branch.
+    """
+    cwd = get_workspace_root()
+    token = os.getenv("GITHUB_PAT") or os.getenv("GITHUB_TOKEN")
+    
+    if not token:
+        return {
+            "success": False,
+            "error": "GITHUB_PAT or GITHUB_TOKEN environment variable is not configured in .env file."
+        }
+        
+    status = get_git_status()
+    if not status.get("initialized"):
+        return {"success": False, "error": "Not a git repository."}
+        
+    active_branch = status.get("active_branch")
+    if active_branch in ["main", "master"]:
+        return {"success": False, "error": "Cannot create a PR from the main branch. Please make a business logic change first to create an AI branch."}
+        
+    owner = status.get("repo_owner")
+    repo = status.get("repo_name")
+    if not owner or not repo:
+        return {"success": False, "error": "Could not determine GitHub repository owner or name from remote origin."}
+        
+    try:
+        push_url = f"https://{token}@github.com/{owner}/{repo}.git"
+        run_git_cmd(["push", "--set-upstream", push_url, active_branch], cwd)
+        
+        base_branch = "main"
+        try:
+            run_git_cmd(["show-ref", "--verify", "refs/heads/master"], cwd)
+            base_branch = "master"
+        except Exception:
+            pass
+            
+        pr_api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        payload = {
+            "title": title,
+            "body": body,
+            "head": active_branch,
+            "base": base_branch
+        }
+        
+        response = requests.post(pr_api_url, json=payload, headers=headers)
+        
+        if response.status_code == 201:
+            data = response.json()
+            return {
+                "success": True,
+                "pr_url": data.get("html_url"),
+                "pr_number": data.get("number"),
+                "branch_name": active_branch
+            }
+        else:
+            err_msg = response.json().get("message", "Unknown error from GitHub API")
+            return {
+                "success": False,
+                "error": f"Failed to create PR (status {response.status_code}): {err_msg}"
+            }
+    except Exception as e:
+        return {"success": False, "error": str(e)}

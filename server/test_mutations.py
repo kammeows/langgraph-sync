@@ -410,6 +410,24 @@ def my_node(state):
         self.assertIn('model="openai/gpt-4o"', mutated)
         self.assertNotIn('model="deepseek/deepseek-chat"', mutated)
 
+    def test_edit_business_logic_mutation(self):
+        source_code = """
+def my_node(state):
+    # Old logic
+    return {"output": "hello"}
+"""
+        new_code = """def my_node(state):
+    # New logic
+    return {"output": "world", "updated": True}"""
+        
+        mutated = apply_mutation_to_source(
+            source_code,
+            "edit_business_logic",
+            payload={"function_name": "my_node", "new_code": new_code}
+        )
+        self.assertIn('return {"output": "world", "updated": True}', mutated)
+        self.assertNotIn('return {"output": "hello"}', mutated)
+
 if __name__ == "__main__":
     unittest.main()
 

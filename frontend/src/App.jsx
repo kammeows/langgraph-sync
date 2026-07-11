@@ -92,6 +92,9 @@ function App() {
   const [selectedGraphId, setSelectedGraphId] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
   const [cometModels, setCometModels] = useState([]);
+  const [copilotMode, setCopilotMode] = useState("structural");
+  const [copilotModel, setCopilotModel] = useState("google/gemini-2.5-flash");
+  const [gitStatus, setGitStatus] = useState(null);
   const editorRef = useRef(null);
   const rawGraphDataRef = useRef(null);
 
@@ -422,11 +425,16 @@ function App() {
             query: text,
             graph_id: selectedGraphId,
             history: copilotMessages,
+            mode: copilotMode,
+            model: copilotModel,
           }),
         });
 
         if (response.ok) {
           const data = await response.json();
+          if (data.git_status) {
+            setGitStatus(data.git_status);
+          }
           if (data.success) {
             setCopilotMessages((prev) => [
               ...prev,
@@ -443,11 +451,12 @@ function App() {
             ]);
           }
         } else {
+          const errorData = await response.json().catch(() => ({}));
           setCopilotMessages((prev) => [
             ...prev,
             {
               sender: "copilot",
-              content: "Failed to connect to the Copilot service.",
+              content: errorData.detail || "Failed to connect to the Copilot service.",
               isError: true,
             },
           ]);
@@ -466,8 +475,31 @@ function App() {
         setIsCopilotLoading(false);
       }
     },
-    [copilotInput, selectedGraphId, setCode, processGraphStateInternal],
+    [copilotInput, selectedGraphId, setCode, processGraphStateInternal, copilotMode, copilotModel],
   );
+
+  const handleDiscardGitChanges = useCallback(async () => {
+    if (!window.confirm("Are you sure you want to discard all changes and switch back to main/master? This cannot be undone.")) return;
+    try {
+      const res = await fetch("http://localhost:8000/api/git/discard", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setGitStatus(data.git_status);
+        if (selectedGraphId) {
+          const graphRes = await fetch(`http://localhost:8000/api/graph?graph_id=${selectedGraphId}`);
+          const graphData = await graphRes.json();
+          setCode(graphData.code);
+          processGraphStateInternal(graphData);
+        }
+        alert(data.message);
+      } else {
+        alert("Discard failed: " + (data.detail || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("Discard failed:", err);
+      alert("Failed to discard changes.");
+    }
+  }, [selectedGraphId, setCode, processGraphStateInternal]);
 
   // 4. Backend-Calling Handlers
 
@@ -836,7 +868,7 @@ function App() {
     };
   }, [onRenameNode, onDeleteNode, onDeleteEdge, onRenameEdgeLabel]);
 
-  // Fetch Comet API models on app load
+  // Fetch Comet API models and Git status on app load
   useEffect(() => {
     const fetchCometModels = async () => {
       try {
@@ -851,7 +883,19 @@ function App() {
         console.error("Failed to fetch Comet models:", error);
       }
     };
+    const fetchGitStatus = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/api/git/status");
+        if (response.ok) {
+          const data = await response.json();
+          setGitStatus(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch Git status:", error);
+      }
+    };
     fetchCometModels();
+    fetchGitStatus();
   }, []);
 
   // Fetch graph whenever selectedGraphId changes
@@ -1255,6 +1299,79 @@ function App() {
               </div>
             </div>
             <div className="copilot-chat-container">
+              <div className="copilot-mode-toggle-row">
+                <button
+                  type="button"
+                  className={`copilot-mode-btn ${copilotMode === "structural" ? "active" : ""}`}
+                  onClick={() => setCopilotMode("structural")}
+                >
+                  🛠️ Structural Autopilot
+                </button>
+                <button
+                  type="button"
+                  className={`copilot-mode-btn ${copilotMode === "business" ? "active" : ""}`}
+                  onClick={() => setCopilotMode("business")}
+                >
+                  💻 Business Coder
+                </button>
+              </div>
+
+              {copilotMode === "business" && (
+                <div className="copilot-model-selector-bar">
+                  <span className="copilot-model-label">Model:</span>
+                  <select
+                    className="copilot-model-select"
+                    value={copilotModel}
+                    onChange={(e) => setCopilotModel(e.target.value)}
+                  >
+                    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    {cometModels && cometModels.filter(m => m.includes("/")).map(m => {
+                      let label = m;
+                      if (m.includes("deepseek-chat") || m === "deepseek/deepseek-chat") label = "DeepSeek V3";
+                      else if (m.includes("deepseek-reasoner") || m === "deepseek/deepseek-reasoner") label = "DeepSeek R1";
+                      else if (m.includes("claude-3-5-sonnet") || m.includes("claude-3.5-sonnet")) label = "Claude 3.5 Sonnet";
+                      else if (m.includes("gpt-4o-mini")) label = "GPT-4o Mini";
+                      else if (m.includes("gpt-4o")) label = "GPT-4o";
+                      else if (m.includes("gemini-2.5-flash")) label = "Gemini 2.5 Flash";
+                      return (
+                        <option key={m} value={m}>
+                          {label} ({m})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {gitStatus && gitStatus.active_branch && gitStatus.active_branch.startsWith("feature/ai-patch-") && (
+                <div className="git-active-branch-banner">
+                  <div className="branch-info">
+                    <span className="branch-icon">🔀</span>
+                    <span className="branch-name" title={gitStatus.active_branch}>
+                      {gitStatus.active_branch}
+                    </span>
+                  </div>
+                  <div className="branch-actions">
+                    <button 
+                      type="button"
+                      className="branch-action-btn pr"
+                      onClick={() => setIsPRModalOpen(true)}
+                      title="Open GitHub PR Modal"
+                    >
+                      🚀 PR
+                    </button>
+                    <button 
+                      type="button"
+                      className="branch-action-btn discard"
+                      onClick={handleDiscardGitChanges}
+                      title="Discard AI Branch & Checkout Main"
+                    >
+                      🗑️ Discard
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="copilot-messages">
                 {copilotMessages.map((msg, index) => (
                   <div
@@ -1276,50 +1393,76 @@ function App() {
 
               <div className="copilot-input-area">
                 <div className="copilot-suggestions">
-                  <button
-                    className="suggestion-chip"
-                    onClick={() =>
-                      handleSendCopilotMessage(
-                        "Add a node called database_lookup",
-                      )
-                    }
-                  >
-                    ➕ Add node 'database_lookup'
-                  </button>
-                  <button
-                    className="suggestion-chip"
-                    onClick={() =>
-                      handleSendCopilotMessage("Connect router_v2 to tool")
-                    }
-                  >
-                    🔗 Connect 'router_v2' to 'tool'
-                  </button>
-                  <button
-                    className="suggestion-chip"
-                    onClick={() =>
-                      handleSendCopilotMessage(
-                        "Rename researcherss to researcher",
-                      )
-                    }
-                  >
-                    📝 Rename 'researcherss'
-                  </button>
-                  <button
-                    className="suggestion-chip"
-                    onClick={() =>
-                      handleSendCopilotMessage(
-                        "Modify prompt inside research_agent",
-                      )
-                    }
-                  >
-                    ⚠️ Test business logic block
-                  </button>
+                  {copilotMode === "business" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="suggestion-chip"
+                        onClick={() =>
+                          handleSendCopilotMessage(
+                            "Rewrite database_expert to connect to a PostgreSQL database",
+                          )
+                        }
+                      >
+                        💻 postgresql database connection
+                      </button>
+                      <button
+                        type="button"
+                        className="suggestion-chip"
+                        onClick={() =>
+                          handleSendCopilotMessage(
+                            "Implement prompt logic inside research_assistant using LLM call",
+                          )
+                        }
+                      >
+                        📝 Prompt logic research assistant
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="suggestion-chip"
+                        onClick={() =>
+                          handleSendCopilotMessage(
+                            "Add a node called database_lookup",
+                          )
+                        }
+                      >
+                        ➕ Add node 'database_lookup'
+                      </button>
+                      <button
+                        type="button"
+                        className="suggestion-chip"
+                        onClick={() =>
+                          handleSendCopilotMessage("Connect router_v2 to tool")
+                        }
+                      >
+                        🔗 Connect 'router_v2' to 'tool'
+                      </button>
+                      <button
+                        type="button"
+                        className="suggestion-chip"
+                        onClick={() =>
+                          handleSendCopilotMessage(
+                            "Rename researcherss to researcher",
+                          )
+                        }
+                      >
+                        📝 Rename 'researcherss'
+                      </button>
+                    </>
+                  )}
                 </div>
                 <div className="copilot-input-wrapper">
                   <input
                     type="text"
                     className="copilot-input"
-                    placeholder="Ask copilot to change graph structure..."
+                    placeholder={
+                      copilotMode === "business"
+                        ? "Ask coder to rewrite function body..."
+                        : "Ask copilot to change graph structure..."
+                    }
                     value={copilotInput}
                     onChange={(e) => setCopilotInput(e.target.value)}
                     onKeyDown={(e) =>
@@ -1328,6 +1471,7 @@ function App() {
                     disabled={isCopilotLoading}
                   />
                   <button
+                    type="button"
                     className="copilot-send-btn"
                     onClick={() => handleSendCopilotMessage()}
                     disabled={isCopilotLoading || !copilotInput.trim()}

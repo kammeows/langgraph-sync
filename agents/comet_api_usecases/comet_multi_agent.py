@@ -15,13 +15,12 @@ class CometAgentState(TypedDict):
     coder_output: str
     critic_output: str
     final_response: str
-
 def planner_node(state: CometAgentState):
     """Planner node using DeepSeek V3 via Comet API."""
     response = comet_client.chat.completions.create(
         model="deepseek/deepseek-chat",
         messages=[
-            {"role": "system", "content": "You are a senior planner agent."},
+            {"role": "system", "content": "You are a meticulous and highly organized senior planner. Your task is to create a comprehensive, step-by-step plan to achieve the user's goal. Break down the task into clear phases, specify dependencies between phases, suggest any required tools or resources, and flag potential risks or edge cases. Your output should be structured, actionable, and easy for a coder to follow."},
             {"role": "user", "content": f"Plan this task: {state['query']}"}
         ]
     )

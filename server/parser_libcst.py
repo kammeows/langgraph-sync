@@ -1123,6 +1123,21 @@ class ChangeNodeModelTransformer(cst.CSTTransformer):
                 return updated_node.with_changes(args=new_args)
         return updated_node
 
+class ReplaceFunctionTransformer(cst.CSTTransformer):
+    def __init__(self, function_name: str, new_function_code: str):
+        self.function_name = function_name
+        self.new_function_code = new_function_code
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
+        if original_node.name.value == self.function_name:
+            try:
+                new_node = cst.parse_statement(self.new_function_code.strip())
+                if isinstance(new_node, cst.FunctionDef):
+                    return new_node
+            except Exception as e:
+                print(f"Failed to parse new function code: {e}")
+        return updated_node
+
 class SetEntryPointTransformer(cst.CSTTransformer):
     def __init__(self, target_id: str, graph_var: str):
         self.target_id = target_id

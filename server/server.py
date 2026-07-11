@@ -8,7 +8,7 @@ import traceback
 import json
 from dotenv import load_dotenv
 from copilot.service import run_copilot_chat
-from git_service import get_git_status, get_git_diff, create_pull_request
+from git_service import get_git_status, get_git_diff, create_pull_request, run_git_cmd, get_workspace_root
 
 class CreatePRRequest(BaseModel):
     title: str
@@ -105,6 +105,8 @@ class CopilotChatRequest(BaseModel):
     query: str
     graph_id: str
     history: Optional[List[ChatMessage]] = None
+    mode: Optional[str] = "structural"
+    model: Optional[str] = "google/gemini-2.5-flash"
 
 def parse_code_to_graph(source_code: str, graph_id: Optional[str] = None):
 
@@ -179,10 +181,45 @@ async def git_diff():
 
 @app.post("/api/git/create-pr")
 async def git_create_pr(request: CreatePRRequest):
-    res = create_pull_request(request.title, request.body)
+    status = get_git_status()
+    active_branch = status.get("active_branch", "")
+    if active_branch.startswith("feature/ai-patch-"):
+        from git_service import create_pr_for_active_branch
+        res = create_pr_for_active_branch(request.title, request.body)
+    else:
+        res = create_pull_request(request.title, request.body)
+        
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error", "Failed to create PR"))
     return res
+
+@app.post("/api/git/discard")
+async def git_discard():
+    cwd = get_workspace_root()
+    try:
+        run_git_cmd(["reset", "--hard"], cwd)
+        
+        status = get_git_status()
+        active_branch = status.get("active_branch", "")
+        
+        base_branch = "main"
+        try:
+            run_git_cmd(["show-ref", "--verify", "refs/heads/master"], cwd)
+            base_branch = "master"
+        except Exception:
+            pass
+            
+        if active_branch.startswith("feature/ai-patch-"):
+            run_git_cmd(["checkout", base_branch], cwd)
+            run_git_cmd(["branch", "-D", active_branch], cwd)
+            
+        return {
+            "success": True, 
+            "message": f"Successfully discarded changes and checked out {base_branch}.",
+            "git_status": get_git_status()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/graph")
 async def get_graph(graph_id: Optional[str] = None):
@@ -305,6 +342,15 @@ def apply_mutation_to_source(
         new_module = module.visit(transformer)
         return new_module.code
 
+    elif action == "edit_business_logic":
+        if not payload or "function_name" not in payload or "new_code" not in payload:
+            raise HTTPException(status_code=400, detail="Missing payload keys 'function_name' or 'new_code'")
+        module = cst.parse_module(source_code)
+        from parser_libcst import ReplaceFunctionTransformer
+        transformer = ReplaceFunctionTransformer(payload["function_name"], payload["new_code"])
+        new_module = module.visit(transformer)
+        return new_module.code
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported mutation action: {action}")
 
@@ -378,7 +424,15 @@ async def copilot_chat(request: CopilotChatRequest):
         if request.history:
             for item in request.history:
                 history_list.append({"sender": item.sender, "content": item.content})
-        result = await run_copilot_chat(request.query, nodes_summary, edges_summary, history_list)
+        result = await run_copilot_chat(
+            query=request.query, 
+            nodes_summary=nodes_summary, 
+            edges_summary=edges_summary, 
+            history=history_list,
+            mode=request.mode,
+            model=request.model,
+            source_code=source_code
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -386,7 +440,8 @@ async def copilot_chat(request: CopilotChatRequest):
         return {
             "success": False,
             "message": f"AI service failed: {str(e)}",
-            "graph": graph_data
+            "graph": graph_data,
+            "git_status": get_git_status()
         }
 
     # Parse response format dynamically
@@ -409,8 +464,9 @@ async def copilot_chat(request: CopilotChatRequest):
     if rejected or not mutations:
         return {
             "success": False,
-            "message": message or "I cannot perform that request as it does not involve a structural graph mutation.",
-            "graph": graph_data
+            "message": message or "I cannot perform that request.",
+            "graph": graph_data,
+            "git_status": get_git_status()
         }
     
     try:
@@ -420,6 +476,12 @@ async def copilot_chat(request: CopilotChatRequest):
         if selected:
             target_var = selected["var"]
             
+        is_business_logic = (request.mode == "business") or any(m.get("action") == "edit_business_logic" for m in mutations)
+        
+        if is_business_logic:
+            from git_service import ensure_ai_branch, commit_all_changes
+            ensure_ai_branch()
+
         current_code = source_code
         for mutation in mutations:
             action = mutation.get("action")
@@ -438,18 +500,24 @@ async def copilot_chat(request: CopilotChatRequest):
         with open(file_path, "w", encoding="utf8") as f:
             f.write(current_code)
             
+        if is_business_logic:
+            func_name = mutations[0].get("payload", {}).get("function_name", "node") if mutations else "node"
+            commit_all_changes(f"AI Business Coder: update implementation of {func_name}")
+            
         updated_graph = parse_code_to_graph(current_code, request.graph_id)
         return {
             "success": True,
             "message": message or "Mutations applied successfully.",
-            "graph": updated_graph
+            "graph": updated_graph,
+            "git_status": get_git_status()
         }
     except Exception as e:
         traceback.print_exc()
         return {
             "success": False,
             "message": f"Failed to apply mutations: {str(e)}",
-            "graph": graph_data
+            "graph": graph_data,
+            "git_status": get_git_status()
         }
 
 @app.get("/api/comet/models")
