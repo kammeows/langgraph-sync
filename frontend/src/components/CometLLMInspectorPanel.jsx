@@ -11,7 +11,68 @@ const COMET_MODELS = [
   { value: "meta-llama/llama-3.1-405b-instruct", label: "Llama 3.1 405B" },
 ];
 
-const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = [] }) => {
+const formatCometModelPath = (modelStr, cometModels = []) => {
+  if (!modelStr) return "";
+  const trimmed = modelStr.trim();
+
+  // If it already has a slash, make sure the provider part is lowercased
+  if (trimmed.includes("/")) {
+    const parts = trimmed.split("/");
+    return `${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
+  }
+
+  const lower = trimmed.toLowerCase();
+
+  // 1. Try to find a match in the dynamically fetched cometModels list by matching the part after the slash
+  if (cometModels && cometModels.length > 0) {
+    const matched = cometModels.find((modelId) => {
+      const parts = modelId.split("/");
+      if (parts.length === 2) {
+        return parts[1].toLowerCase() === lower;
+      }
+      return false;
+    });
+    if (matched) {
+      return matched;
+    }
+  }
+
+  // 2. Fallback to hardcoded inference rules if not found in the fetched list
+  if (lower.includes("deepseek")) {
+    return `deepseek/${lower}`;
+  }
+  if (
+    lower.includes("gpt") ||
+    lower.startsWith("o1") ||
+    lower.startsWith("o3") ||
+    lower.includes("text-embedding")
+  ) {
+    return `openai/${lower}`;
+  }
+  if (lower.includes("claude")) {
+    return `anthropic/${lower}`;
+  }
+  if (lower.includes("gemini")) {
+    return `google/${lower}`;
+  }
+  if (lower.includes("llama")) {
+    return `meta-llama/${lower}`;
+  }
+  if (lower.includes("qwen")) {
+    return `qwen/${lower}`;
+  }
+  if (lower.includes("mistral") || lower.includes("mixtral")) {
+    return `mistral/${lower}`;
+  }
+  return lower;
+};
+
+const CometLLMInspectorPanel = ({
+  node,
+  onClose,
+  onModelChange,
+  cometModels = [],
+}) => {
   if (!node) return null;
 
   const {
@@ -27,18 +88,96 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
   const [customModel, setCustomModel] = useState("");
 
   const sortedCometModels = cometModels ? [...cometModels].sort() : [];
-  const modelsList = sortedCometModels.length > 0
-    ? sortedCometModels.map(modelId => {
-        let label = modelId;
-        if (modelId.includes("deepseek-chat") || modelId === "deepseek/deepseek-chat") label = "DeepSeek V3";
-        else if (modelId.includes("deepseek-reasoner") || modelId === "deepseek/deepseek-reasoner") label = "DeepSeek R1";
-        else if (modelId.includes("claude-3-5-sonnet") || modelId.includes("claude-3.5-sonnet")) label = "Claude 3.5 Sonnet";
-        else if (modelId.includes("gpt-4o-mini")) label = "GPT-4o Mini";
-        else if (modelId.includes("gpt-4o")) label = "GPT-4o";
-        else if (modelId.includes("gemini-2.5-flash")) label = "Gemini 2.5 Flash";
-        return { value: modelId, label };
-      })
-    : COMET_MODELS;
+  const rawList =
+    sortedCometModels.length > 0
+      ? sortedCometModels.map((modelId) => {
+          let label = modelId;
+          if (
+            modelId.includes("deepseek-chat") ||
+            modelId === "deepseek/deepseek-chat"
+          )
+            label = "DeepSeek V3";
+          else if (
+            modelId.includes("deepseek-reasoner") ||
+            modelId === "deepseek/deepseek-reasoner"
+          )
+            label = "DeepSeek R1";
+          else if (
+            modelId.includes("claude-3-5-sonnet") ||
+            modelId.includes("claude-3.5-sonnet")
+          )
+            label = "Claude 3.5 Sonnet";
+          else if (modelId.includes("gpt-4o-mini")) label = "GPT-4o Mini";
+          else if (modelId.includes("gpt-4o")) label = "GPT-4o";
+          else if (modelId.includes("gemini-2.5-flash"))
+            label = "Gemini 2.5 Flash";
+          return { value: modelId, label };
+        })
+      : COMET_MODELS;
+
+  const modelsList = rawList.filter(m => {
+    const formatted = formatCometModelPath(m.value, cometModels);
+    return formatted && formatted.includes("/");
+  });
+
+  const getModelCost = (modelPath) => {
+    const path = modelPath ? modelPath.toLowerCase() : "";
+    if (path.includes("deepseek-chat") || path === "deepseek/deepseek-chat") {
+      return "In: $0.14 | Out: $0.28";
+    }
+    if (
+      path.includes("deepseek-reasoner") ||
+      path === "deepseek/deepseek-reasoner"
+    ) {
+      return "In: $0.55 | Out: $2.19";
+    }
+    if (
+      path.includes("claude-3-5-sonnet") ||
+      path.includes("claude-3.5-sonnet")
+    ) {
+      return "In: $2.40 | Out: $12.00";
+    }
+    if (path.includes("gpt-4o-mini")) {
+      return "In: $0.12 | Out: $0.48";
+    }
+    if (path.includes("gpt-4o")) {
+      return "In: $4.00 | Out: $12.00";
+    }
+    if (path.includes("gemini-2.5-flash")) {
+      return "In: $0.06 | Out: $0.24";
+    }
+    if (path.includes("llama-3.1-405b")) {
+      return "In: $2.13 | Out: $2.13";
+    }
+    return "20% Gateway Discount";
+  };
+
+  const getModelLatency = (modelPath) => {
+    const path = modelPath ? modelPath.toLowerCase() : "";
+    if (
+      path.includes("mini") ||
+      path.includes("flash") ||
+      path.includes("chat")
+    ) {
+      if (path.includes("deepseek")) return "Fast (~1.2s)";
+      return "Ultra Fast (<1.0s)";
+    }
+    if (
+      path.includes("reasoner") ||
+      path.includes("thinking") ||
+      path.includes("o1")
+    ) {
+      return "Thinking (~4.0s - 15.0s)";
+    }
+    if (
+      path.includes("sonnet") ||
+      path.includes("gpt-4o") ||
+      path.includes("405b")
+    ) {
+      return "Moderate (~1.5s - 2.5s)";
+    }
+    return "Variable (1.0s - 3.0s)";
+  };
 
   // Map providers to colors/logos
   const getProviderStyle = (provider) => {
@@ -137,7 +276,22 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
               const style = getProviderStyle(call.provider);
               const isCometCall = call.is_comet;
               const fullModelPath = call.raw_model || call.model;
-              const isPredefined = modelsList.some(m => m.value === fullModelPath);
+
+              const matchingModel = modelsList.find(
+                (m) =>
+                  m.value.toLowerCase() === fullModelPath.toLowerCase() ||
+                  m.value
+                    .toLowerCase()
+                    .endsWith("/" + fullModelPath.toLowerCase()) ||
+                  fullModelPath
+                    .toLowerCase()
+                    .endsWith("/" + m.value.toLowerCase()),
+              );
+
+              const isPredefined = !!matchingModel;
+              const selectValue = matchingModel
+                ? matchingModel.value
+                : "custom";
 
               return (
                 <div
@@ -177,7 +331,11 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
                             className="model-action-btn save"
                             onClick={() => {
                               if (customModel.trim() && onModelChange) {
-                                onModelChange(functionName, customModel.trim());
+                                const formatted = formatCometModelPath(
+                                  customModel.trim(),
+                                  cometModels,
+                                );
+                                onModelChange(functionName, formatted);
                               }
                               setEditingIndex(null);
                             }}
@@ -196,7 +354,7 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
                           <span className="model-label">Model:</span>
                           <select
                             className="inspector-model-select"
-                            value={isPredefined ? fullModelPath : "custom"}
+                            value={selectValue}
                             onChange={(e) => {
                               const val = e.target.value;
                               if (val === "custom") {
@@ -204,7 +362,10 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
                                 setEditingIndex(idx);
                               } else {
                                 if (onModelChange) {
-                                  onModelChange(functionName, val);
+                                  onModelChange(
+                                    functionName,
+                                    formatCometModelPath(val, cometModels),
+                                  );
                                 }
                               }
                             }}
@@ -219,10 +380,37 @@ const CometLLMInspectorPanel = ({ node, onClose, onModelChange, cometModels = []
                                 Current: {fullModelPath}
                               </option>
                             )}
-                            <option value="custom">✏️ Custom Model Path...</option>
+                            <option value="custom">
+                              ✏️ Custom Model Path...
+                            </option>
                           </select>
                         </div>
                       )}
+
+                      <div className="model-metrics-row">
+                        <div className="metric-box">
+                          <span className="metric-icon">💰</span>
+                          <div className="metric-details">
+                            <span className="metric-label">
+                              Est. Cost (per M tokens):{" "}
+                            </span>
+                            <span className="metric-value">
+                              {getModelCost(fullModelPath)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="metric-box">
+                          <span className="metric-icon">⚡</span>
+                          <div className="metric-details">
+                            <span className="metric-label">
+                              Avg. Latency Class:{" "}
+                            </span>
+                            <span className="metric-value">
+                              {getModelLatency(fullModelPath)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <>
