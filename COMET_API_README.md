@@ -28,7 +28,7 @@ The **Comet API Integration** extends the LangGraph-Sync platform to parse and d
 - Intercepting chained declarations like `.bind_tools(...)` or `.with_structured_output(...)` to resolve model parameters
 - Changing model selections interactively from the UI and applying mutations directly to the source code without restarting the server
 
-Do make sure you have COMETAPI_KEY defined in your .env file.
+Do make sure you have COMETAPI_KEY defined in your .env file. To use this feature, you will have to clone the repo and use it locally. The updated VSIX extension file will be released soon.
 
 ---
 
